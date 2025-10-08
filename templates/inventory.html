@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>库存管理</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+        <ul class="navbar-nav">
+            <li><a href="{{ url_for('dashboard') }}" class="nav-link">仪表板</a></li>
+            <li><a href="{{ url_for('smart_quote') }}" class="nav-link">智能报价</a></li>
+            <li><a href="{{ url_for('order') }}" class="nav-link">订单管理</a></li>
+            <li><a href="{{ url_for('inventory') }}" class="nav-link active">库存管理</a></li>
+            <!-- 待加：报表/设置 -->
+        </ul>
+    </nav>
+    <div class="container mt-4">
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <div class="alert alert-info">{{ messages[0] }}</div>
+            {% endif %}
+        {% endwith %}
+        <!-- 顶部筛选+新增模态 -->
+        <form method="GET">
+            <div class="row">
+                <div class="col"><input type="text" name="warehouse" placeholder="仓库" value="{{ request.args.get('warehouse', '') }}" class="form-control"></div>
+                <div class="col"><input type="text" name="category" placeholder="分类" value="{{ request.args.get('category', '') }}" class="form-control"></div>
+                <div class="col"><input type="text" name="product" placeholder="产品" value="{{ request.args.get('product', '') }}" class="form-control"></div>
+                <button type="submit" class="btn btn-primary">筛选</button>
+            </div>
+        </form>
+        <button class="btn btn-success mt-2" data-bs-toggle="modal" data-bs-target="#addModal">新增库存</button>
+        
+        <!-- 新增模态 -->
+        <div class="modal fade" id="addModal">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <form method="POST" action="{{ url_for('add_inventory') }}">
+                        <div class="modal-header"><h5>新增库存</h5></div>
+                        <div class="modal-body">
+                            <select name="warehouse_id" class="form-control mb-2">
+                                {% for w in warehouses %}<option value="{{ w['id'] }}">{{ w['name'] }}</option>{% endfor %}
+                            </select>
+                            <select name="category_id" class="form-control mb-2">
+                                {% for c in categories %}<option value="{{ c['id'] }}">{{ c['name'] }}</option>{% endfor %}
+                            </select>
+                            <select name="product_id" class="form-control mb-2">
+                                {% for p in products %}<option value="{{ p['id'] }}">{{ p['name'] }}</option>{% endfor %}
+                            </select>
+                            <input type="number" name="qty" placeholder="数量" class="form-control" required>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="submit" class="btn btn-primary">保存</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 列表 -->
+        <table id="inventoryTable" class="table table-striped mt-3">
+            <thead><tr><th>仓库</th><th>分类</th><th>产品</th><th>数量</th><th>更新时间</th><th>操作</th></tr></thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td>{{ item['warehouse_name'] or '' }}</td>
+                    <td>{{ item['category_name'] or '' }}</td>
+                    <td>{{ item['product_name'] or '' }}</td>
+                    <td>{{ item['qty'] }} {% if item['qty'] < 10 %}<span class="text-danger">低库存!</span>{% endif %}</td>
+                    <td>{{ item['last_update'] }}</td>
+                    <td>
+                        <button class="btn btn-sm btn-warning" onclick="editModal({{ item['id'] }})">编辑</button>
+                        <a href="{{ url_for('delete_inventory', id=item['id']) }}" class="btn btn-sm btn-danger" onclick="return confirm('删?')">删</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <button onclick="exportCSV()" class="btn btn-success">导出CSV</button>
+    </div>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.11.5/js/dataTables.bootstrap5.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            $('#inventoryTable').DataTable({
+                ajax: '/inventory/data',
+                paging: true, sorting: true
+            });
+        });
+        function exportCSV() { window.location = '/inventory/export'; }  // 加导出路由如果需
+        function editModal(id) {
+            // AJAX拉数据填模态，类似addModal但action=update/id
+            // 简化：重定向或JS fetch
+            alert('编辑ID:' + id);  // 扩展用
+        }
+    </script>
+</body>
+</html>

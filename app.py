@@ -93,14 +93,20 @@ def smart_quote():
     print(f"Loaded {len(quotes)} quotes")  # 调试print
     return render_template('smart_quote.html', quotes=quotes)  # 确保模板路径对
 
-@app.route('/smart_quote/data', methods=['GET'])  # AJAX数据
-@login_required
-def smart_quote_data():
-    # DataTables JSON：产品|公司|价格|数量|中标时间|备注|默认中标价
-    conn = get_db()
-    data = conn.execute('SELECT * FROM quotes').fetchall()
-    conn.close()
-    return jsonify([dict(row) for row in data])  # 实时刷新/分页/排序
+@app.route('/smart_quote/data', methods=['GET'])
+def smart_quote_data():  # 无@login_required，AJAX独立session查
+    if 'user' not in session:
+        return jsonify({"error": "Unauthorized", "data": []}), 401  # JSON 401，防HTML重定向
+    try:
+        conn = get_db()
+        data = conn.execute('SELECT * FROM quotes').fetchall()
+        conn.close()
+        json_data = [dict(row) for row in data]
+        print(f"JSON数据: {len(json_data)} 行")  # 调试：终端看行数
+        return jsonify(json_data)  # 纯JSON数组
+    except Exception as e:
+        print(f"AJAX错误: {e}")  # 终端log
+        return jsonify({"error": str(e), "data": []}), 500
 
 @app.route('/smart_quote/bulk', methods=['GET', 'POST'])
 @login_required
@@ -147,6 +153,213 @@ def delete_quote(id):
     conn.close()
     flash('删除成功')
     return redirect(url_for('smart_quote'))
+
+# ========== 订单管理模块（完整：AJAX列表/筛选/CRUD/批量 + 总价sum/库存联动预备） ==========
+from datetime import datetime  # 如果缺，加import
+
+@app.route('/order', methods=['GET', 'POST'])
+@login_required
+def order():
+    conn = get_db()
+    # 筛选
+    type_filter = request.args.get('type', '')
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    customer_filter = request.args.get('customer', '')
+    status_filter = request.args.get('status', '')
+    
+    query = '''
+    SELECT o.*, c.name as customer_name 
+    FROM orders o 
+    LEFT JOIN customers c ON o.customer_id = c.id 
+    WHERE 1=1
+    '''
+    params = []
+    if type_filter:
+        query += ' AND o.type = ?'
+        params.append(type_filter)
+    if date_from:
+        query += ' AND o.date >= ?'
+        params.append(date_from)
+    if date_to:
+        query += ' AND o.date <= ?'
+        params.append(date_to)
+    if customer_filter:
+        query += ' AND c.name LIKE ?'
+        params.append(f'%{customer_filter}%')
+    if status_filter:
+        query += ' AND o.status = ?'
+        params.append(status_filter)
+    
+    orders = conn.execute(query, params).fetchall()
+    
+    # 下拉：类型/状态/客户
+    types = [('销售', '销售'), ('采购', '采购')]
+    statuses = [('待确认', '待确认'), ('已确认', '已确认'), ('完成', '完成')]
+    customers = conn.execute('SELECT id, name FROM customers').fetchall()
+    
+    conn.close()
+    return render_template('order.html', orders=orders, types=types, statuses=statuses, customers=customers)
+
+@app.route('/order/data', methods=['GET'])  # AJAX JSON（修复警告核心）
+def order_data():
+    if 'user' not in session:
+        return jsonify({"error": "Unauthorized", "data": []}), 401
+    try:
+        conn = get_db()
+        type_filter = request.args.get('type', '')
+        date_from = request.args.get('date_from', '')
+        date_to = request.args.get('date_to', '')
+        customer_filter = request.args.get('customer', '')
+        status_filter = request.args.get('status', '')
+        
+        query = '''
+        SELECT o.*, c.name as customer_name 
+        FROM orders o LEFT JOIN customers c ON o.customer_id = c.id 
+        WHERE 1=1
+        '''
+        params = []
+        if type_filter:
+            query += ' AND o.type = ?'
+            params.append(type_filter)
+        if date_from:
+            query += ' AND o.date >= ?'
+            params.append(date_from)
+        if date_to:
+            query += ' AND o.date <= ?'
+            params.append(date_to)
+        if customer_filter:
+            query += ' AND c.name LIKE ?'
+            params.append(f'%{customer_filter}%')
+        if status_filter:
+            query += ' AND o.status = ?'
+            params.append(status_filter)
+        
+        data = conn.execute(query, params).fetchall()
+        conn.close()
+        json_data = [dict(row) for row in data]
+        print(f"订单JSON数据: {len(json_data)} 行")  # 调试
+        return jsonify(json_data)
+    except Exception as e:
+        print(f"订单AJAX错误: {e}")
+        return jsonify({"error": str(e), "data": []}), 500
+
+@app.route('/order/add', methods=['POST'])
+@login_required
+def add_order():
+    conn = get_db()
+    customer_name = request.form['customer']
+    # 自动新增客户
+    cursor = conn.execute('SELECT id FROM customers WHERE name = ?', (customer_name,))
+    row = cursor.fetchone()
+    if not row:
+        conn.execute('INSERT INTO customers (name) VALUES (?)', (customer_name,))
+        customer_id = conn.lastrowid
+    else:
+        customer_id = row[0]
+    
+    # 总价sum（假设明细从form details_json JSON解析）
+    details_json = request.form.get('details_json', '[]')
+    import json
+    details = json.loads(details_json) if details_json else []
+    total_price = sum(float(d.get('price', 0) * d.get('qty', 0)) for d in details)
+    details_count = len(details)
+    
+    conn.execute('''
+        INSERT INTO orders (type, customer_id, date, total_price, status, details_count)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (request.form['type'], customer_id, request.form['date'], total_price, request.form['status'], details_count))
+    
+    # 插明细 (order_details表)
+    order_id = conn.lastrowid
+    for d in details:
+        product_name = d['product']
+        # 自动新增产品
+        cursor = conn.execute('SELECT id FROM products WHERE name = ?', (product_name,))
+        p_row = cursor.fetchone()
+        if not p_row:
+            conn.execute('INSERT INTO products (name) VALUES (?)', (product_name,))
+            product_id = conn.lastrowid
+        else:
+            product_id = p_row[0]
+        conn.execute('INSERT INTO order_details (order_id, product_id, qty, price) VALUES (?, ?, ?, ?)',
+                     (order_id, product_id, d['qty'], d['price']))
+    
+    conn.commit()
+    conn.close()
+    flash('订单新增成功！')
+    return redirect(url_for('order'))
+
+@app.route('/order/update/<int:id>', methods=['POST'])
+@login_required
+def update_order(id):
+    conn = get_db()
+    # 类似add，更新总价
+    details_json = request.form.get('details_json', '[]')
+    details = json.loads(details_json)
+    total_price = sum(float(d.get('price', 0) * d.get('qty', 0)) for d in details)
+    details_count = len(details)
+    
+    conn.execute('''
+        UPDATE orders SET type=?, customer_id=?, date=?, total_price=?, status=?, details_count=?
+        WHERE id=?
+    ''', (request.form['type'], request.form['customer_id'], request.form['date'], total_price, request.form['status'], details_count, id))
+    
+    # 更新明细 (删旧加新)
+    conn.execute('DELETE FROM order_details WHERE order_id = ?', (id,))
+    for d in details:
+        # 类似add，自动新增产品
+        product_name = d['product']
+        cursor = conn.execute('SELECT id FROM products WHERE name = ?', (product_name,))
+        p_row = cursor.fetchone()
+        if not p_row:
+            conn.execute('INSERT INTO products (name) VALUES (?)', (product_name,))
+            product_id = conn.lastrowid
+        else:
+            product_id = p_row[0]
+        conn.execute('INSERT INTO order_details (order_id, product_id, qty, price) VALUES (?, ?, ?, ?)',
+                     (id, product_id, d['qty'], d['price']))
+    
+    conn.commit()
+    conn.close()
+    flash('订单更新成功！')
+    return redirect(url_for('order'))
+
+@app.route('/order/delete/<int:id>')
+@login_required
+def delete_order(id):
+    conn = get_db()
+    conn.execute('DELETE FROM order_details WHERE order_id = ?', (id,))
+    conn.execute('DELETE FROM orders WHERE id = ?', (id,))
+    conn.commit()
+    conn.close()
+    flash('订单删除成功！')
+    return redirect(url_for('order'))
+
+@app.route('/order/bulk', methods=['GET', 'POST'])
+@login_required
+def order_bulk():
+    if request.method == 'POST':
+        file = request.files['file']
+        if file:
+            if file.filename.endswith('.csv'):
+                df = pd.read_csv(file)
+            else:
+                df = pd.read_excel(file)
+            conn = get_db()
+            imported = 0
+            for _, row in df.iterrows():
+                customer_name = row['customer']
+                conn.execute('INSERT OR IGNORE INTO customers (name) VALUES (?)', (customer_name,))
+                total_price = row['total_price']  # 或sum明细列
+                conn.execute('INSERT INTO orders (type, customer, date, total_price, status) VALUES (?, ?, ?, ?, ?)',
+                             (row['type'], customer_name, row['date'], total_price, row['status']))
+                imported += 1
+            conn.commit()
+            conn.close()
+            flash(f'批量导入 {imported} 订单！')
+            return redirect(url_for('order'))
+    return render_template('order_bulk.html')  # 向导：上传/预览/导入
 
 # ========== 订单管理模块（保持不变） ==========
 @app.route('/order', methods=['GET', 'POST'])
@@ -200,3 +413,114 @@ if __name__ == '__main__':
     conn.commit()
     conn.close()
     app.run(debug=True, port=5000)
+    # ========== 库存管理模块（新：CRUD + 订单联动） ==========
+@app.route('/inventory', methods=['GET', 'POST'])
+@login_required
+def inventory():
+    conn = get_db()
+    # 筛选：仓库/分类/产品/日期
+    warehouse_filter = request.args.get('warehouse', '')
+    category_filter = request.args.get('category', '')
+    product_filter = request.args.get('product', '')
+    
+    query = '''
+    SELECT i.*, p.name as product_name, w.name as warehouse_name, c.name as category_name 
+    FROM inventory i 
+    LEFT JOIN products p ON i.product_id = p.id 
+    LEFT JOIN warehouses w ON i.warehouse_id = w.id 
+    LEFT JOIN categories c ON i.category_id = c.id 
+    WHERE 1=1
+    '''
+    params = []
+    if warehouse_filter:
+        query += ' AND w.name LIKE ?'
+        params.append(f'%{warehouse_filter}%')
+    if category_filter:
+        query += ' AND c.name LIKE ?'
+        params.append(f'%{category_filter}%')
+    if product_filter:
+        query += ' AND p.name LIKE ?'
+        params.append(f'%{product_filter}%')
+    
+    items = conn.execute(query, params).fetchall()
+    # 仓库/分类/产品下拉数据
+    warehouses = conn.execute('SELECT id, name FROM warehouses').fetchall()
+    categories = conn.execute('SELECT id, name FROM categories').fetchall()
+    products = conn.execute('SELECT id, name FROM products').fetchall()
+    conn.close()
+    
+    # 测试点：原有模块不影响，库存独立
+    return render_template('inventory.html', items=items, warehouses=warehouses, categories=categories, products=products)
+
+@app.route('/inventory/data', methods=['GET'])  # AJAX JSON
+@login_required
+def inventory_data():
+    conn = get_db()
+    data = conn.execute('''
+        SELECT i.*, p.name as product_name, w.name as warehouse_name, c.name as category_name 
+        FROM inventory i LEFT JOIN products p ON i.product_id = p.id 
+        LEFT JOIN warehouses w ON i.warehouse_id = w.id 
+        LEFT JOIN categories c ON i.category_id = c.id 
+    ''').fetchall()
+    conn.close()
+    return jsonify([dict(row) for row in data])
+
+@app.route('/inventory/add', methods=['POST'])
+@login_required
+def add_inventory():
+    conn = get_db()
+    conn.execute('''
+        INSERT INTO inventory (product_id, warehouse_id, category_id, qty, last_update)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (request.form['product_id'], request.form['warehouse_id'], request.form['category_id'], 
+          request.form['qty'], datetime.now().strftime('%Y-%m-%d')))
+    conn.commit()
+    conn.close()
+    flash('库存新增成功！')
+    return redirect(url_for('inventory'))
+
+@app.route('/inventory/update/<int:id>', methods=['POST'])
+@login_required
+def update_inventory(id):
+    conn = get_db()
+    conn.execute('''
+        UPDATE inventory SET product_id=?, warehouse_id=?, category_id=?, qty=?, last_update=?
+        WHERE id=?
+    ''', (request.form['product_id'], request.form['warehouse_id'], request.form['category_id'], 
+          request.form['qty'], datetime.now().strftime('%Y-%m-%d'), id))
+    conn.commit()
+    conn.close()
+    flash('库存更新成功！')
+    return redirect(url_for('inventory'))
+
+@app.route('/inventory/delete/<int:id>')
+@login_required
+def delete_inventory(id):
+    conn = get_db()
+    conn.execute('DELETE FROM inventory WHERE id=?', (id,))
+    conn.commit()
+    conn.close()
+    flash('库存删除成功！')
+    return redirect(url_for('inventory'))
+
+# 订单确认时联动：扣/增QTY（示例：在order确认路由加钩子）
+# e.g., 在order() POST确认时：
+# conn.execute('UPDATE inventory SET qty = qty - ? WHERE product_id = ? AND warehouse_id = ?', (details_qty, product_id, warehouse_id))
+# 负库存闪警戒：if new_qty < 0: flash('低库存警戒！')
+
+# DB表创建（加到if __name__ CREATE后）
+conn = get_db()
+conn.execute('''CREATE TABLE IF NOT EXISTS warehouses 
+                (id INTEGER PRIMARY KEY, name TEXT)''')
+conn.execute('''CREATE TABLE IF NOT EXISTS categories 
+                (id INTEGER PRIMARY KEY, name TEXT)''')
+conn.execute('''CREATE TABLE IF NOT EXISTS inventory 
+                (id INTEGER PRIMARY KEY, product_id INTEGER, warehouse_id INTEGER, category_id INTEGER, 
+                 qty INTEGER, last_update TEXT)''')
+# 样例数据
+conn.execute("INSERT OR IGNORE INTO warehouses (id, name) VALUES (1, '主仓库'), (2, '备用仓')")
+conn.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (1, '电子'), (2, '家电')")
+conn.execute("INSERT OR IGNORE INTO products (id, name) VALUES (1, '苹果手机'), (2, '三星电视')")
+conn.execute("INSERT OR IGNORE INTO inventory (product_id, warehouse_id, category_id, qty, last_update) VALUES (1, 1, 1, 100, '2025-10-08')")
+conn.commit()
+conn.close()

@@ -152,16 +152,29 @@ function loadTable() {
   table = $('#quoteTable').DataTable({
     destroy: true,
     ajax: {
-      url: '/api/smart_quotes',
-      data: { product: product_q, date_from: date_from, date_to: date_to, company: company_q }
+      url: '/smart_quote/data',
+      data: function(d) {
+        d.product = product_q;
+        d.date_from = date_from;
+        d.date_to = date_to;
+        d.company = company_q;
+      },
+      dataSrc: function(json) {
+        if (json.error) {
+          alert('会话过期或错误: ' + json.error + '，请重新登录');
+          window.location.href = '/login?from=smart_quote';
+          return [];
+        }
+        return json;
+      }
     },
     columns: [
       { data: 'product' },
       { data: 'company' },
       { data: 'price', render: function(data) { return data.toFixed(2); } },
       { data: 'qty' },
-      { data: 'time' },
-      { data: 'remark' },
+      { data: 'bid_date' },
+      { data: 'remarks' },
       { data: 'default_bid', render: function(data) { return data ? data.toFixed(2) : ''; } },
       { data: null, render: function(data, type, row) {
         return `<button class="btn btn-sm btn-primary edit-btn" data-id="${row.id}">编辑</button>
@@ -212,8 +225,8 @@ $(document).on('click', '.edit-btn', function() {
     $('#edit_company').val(data.company);
     $('#edit_price').val(data.price);
     $('#edit_qty').val(data.qty);
-    $('#edit_time').val(data.time);
-    $('#edit_remark').val(data.remark);
+    $('#edit_time').val(data.bid_date);
+    $('#edit_remark').val(data.remarks);
     $('#edit_default_bid').val(data.default_bid);
     new bootstrap.Modal(document.getElementById('editModal')).show();
   });
@@ -227,8 +240,8 @@ $('#saveEdit').click(function() {
       company: $('#edit_company').val(),
       price: parseFloat($('#edit_price').val()) || 0,
       qty: parseInt($('#edit_qty').val()) || 0,
-      time: $('#edit_time').val(),
-      remark: $('#edit_remark').val(),
+      bid_date: $('#edit_time').val(),
+      remarks: $('#edit_remark').val(),
       default_bid: parseFloat($('#edit_default_bid').val()) || 0
     }
   };
