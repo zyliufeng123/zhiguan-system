@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html><head><title>智能报价</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/custom.css') }}">
+<!-- DataTables CSS -->
+<link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.11.5/css/jquery.dataTables.min.css">
+<link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/buttons/2.2.2/css/buttons.dataTables.min.css">
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.2.2/js/dataTables.buttons.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.53/pdfmake.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.53/vfs_fonts.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.2.2/js/buttons.html5.min.js"></script>
+</head><body>
+<!-- 顶部栏 -->
+<nav class="navbar navbar-expand-lg">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="#">智管</a>
+    <div class="navbar-nav ms-auto">
+      <a class="nav-link" href="/logout">退出</a>
+    </div>
+  </div>
+</nav>
+
+<!-- 左侧侧边栏 -->
+<div class="sidebar d-none d-lg-block">
+  <ul>
+    <li><a href="/smart_quote">智能报价</a></li>
+    <li><a href="/order">订单管理</a></li>
+    <li><a href="/inventory">库存管理</a></li>
+    <li><a href="/pivot">透视报表</a></li>
+    <li><a href="/settings">系统设置</a></li>
+  </ul>
+</div>
+
+<div class="container-fluid mt-3" style="margin-left: 250px; padding: 20px;">
+  <h2>智能报价管理</h2>
+  <div class="row mb-3">
+    <div class="col-md-8">
+      <!-- 筛选表单 -->
+      <form id="filterForm">
+        <div class="row">
+          <div class="col-md-3">
+            <label>产品名:</label>
+            <input type="text" id="product_q" class="form-control" placeholder="输入检索">
+          </div>
+          <div class="col-md-3">
+            <label>日期从:</label>
+            <input type="date" id="date_from" class="form-control">
+          </div>
+          <div class="col-md-3">
+            <label>日期到:</label>
+            <input type="date" id="date_to" class="form-control">
+          </div>
+          <div class="col-md-3">
+            <label>公司:</label>
+            <input type="text" id="company_input" class="form-control" placeholder="输入检索">
+            <select id="company_select" class="form-select" style="display: none;"></select>
+          </div>
+        </div>
+        <div class="row mt-2">
+          <div class="col-md-12 text-end">
+            <button type="button" id="resetBtn" class="btn btn-secondary">重置</button>
+            <button type="button" id="filterBtn" class="btn btn-primary">筛选</button>
+          </div>
+        </div>
+      </form>
+    </div>
+    <div class="col-md-4 text-end">
+      <a href="/smart_quote/bulk" class="btn btn-success">批量导入</a>
+      <a href="/formula" class="btn btn-info">编辑公式</a>
+    </div>
+  </div>
+
+  <!-- 列表 -->
+  <div class="row">
+    <div class="col-12">
+      <table id="quoteTable" class="table table-striped" style="width:100%">
+        <thead>
+          <tr>
+            <th>产品名</th>
+            <th>公司</th>
+            <th>价格</th>
+            <th>数量</th>
+            <th>中标时间</th>
+            <th>备注</th>
+            <th>默认中标价</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+      </table>
+    </div>
+  </div>
+
+  <!-- 编辑模态窗 -->
+  <div class="modal fade" id="editModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">编辑记录</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="editForm">
+            <input type="hidden" id="edit_id">
+            <div class="mb-2">
+              <label>公司:</label>
+              <input type="text" id="edit_company" class="form-control">
+            </div>
+            <div class="mb-2">
+              <label>价格:</label>
+              <input type="number" id="edit_price" class="form-control">
+            </div>
+            <div class="mb-2">
+              <label>数量:</label>
+              <input type="number" id="edit_qty" class="form-control">
+            </div>
+            <div class="mb-2">
+              <label>中标时间:</label>
+              <input type="date" id="edit_time" class="form-control">
+            </div>
+            <div class="mb-2">
+              <label>备注:</label>
+              <input type="text" id="edit_remark" class="form-control">
+            </div>
+            <div class="mb-2">
+              <label>默认中标价:</label>
+              <input type="number" id="edit_default_bid" class="form-control">
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+          <button type="button" id="saveEdit" class="btn btn-primary">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let table;
+
+// 加载列表
+function loadTable() {
+  const product_q = $('#product_q').val();
+  const date_from = $('#date_from').val();
+  const date_to = $('#date_to').val();
+  const company_q = $('#company_input').val() || $('#company_select').val();
+
+  table = $('#quoteTable').DataTable({
+    destroy: true,
+    ajax: {
+      url: '/api/smart_quotes',
+      data: { product: product_q, date_from: date_from, date_to: date_to, company: company_q }
+    },
+    columns: [
+      { data: 'product' },
+      { data: 'company' },
+      { data: 'price', render: function(data) { return data.toFixed(2); } },
+      { data: 'qty' },
+      { data: 'time' },
+      { data: 'remark' },
+      { data: 'default_bid', render: function(data) { return data ? data.toFixed(2) : ''; } },
+      { data: null, render: function(data, type, row) {
+        return `<button class="btn btn-sm btn-primary edit-btn" data-id="${row.id}">编辑</button>
+                <button class="btn btn-sm btn-danger delete-btn" data-id="${row.id}">删除</button>`;
+      } }
+    ],
+    pageLength: 10,
+    lengthMenu: [10, 25, 50],
+    dom: 'Bfrtip',
+    buttons: ['copy', 'csv', 'excel', 'pdf', 'print']
+  });
+}
+
+// 筛选
+$('#filterBtn').click(loadTable);
+
+// 重置
+$('#resetBtn').click(function() {
+  $('#product_q, #date_from, #date_to, #company_input, #company_select').val('');
+  loadTable();
+});
+
+// 公司输入检索下拉
+$('#company_input').on('input', function() {
+  const q = $(this).val();
+  if (q.length > 1) {
+    fetch(`/api/companies?q=${q}`).then(r => r.json()).then(data => {
+      $('#company_select').empty().append('<option value="">选择公司</option>');
+      data.forEach(comp => {
+        $('#company_select').append(`<option value="${comp}">${comp}</option>`);
+      });
+      $('#company_select').show();
+    });
+  } else {
+    $('#company_select').hide();
+  }
+});
+
+$('#company_select').change(function() {
+  $('#company_input').val($(this).val());
+});
+
+// 编辑
+$(document).on('click', '.edit-btn', function() {
+  const id = $(this).data('id');
+  fetch(`/api/smart_quotes/${id}`).then(r => r.json()).then(data => {
+    $('#edit_id').val(data.id);
+    $('#edit_company').val(data.company);
+    $('#edit_price').val(data.price);
+    $('#edit_qty').val(data.qty);
+    $('#edit_time').val(data.time);
+    $('#edit_remark').val(data.remark);
+    $('#edit_default_bid').val(data.default_bid);
+    new bootstrap.Modal(document.getElementById('editModal')).show();
+  });
+});
+
+// 保存编辑
+$('#saveEdit').click(function() {
+  const data = {
+    id: $('#edit_id').val(),
+    data: {
+      company: $('#edit_company').val(),
+      price: parseFloat($('#edit_price').val()) || 0,
+      qty: parseInt($('#edit_qty').val()) || 0,
+      time: $('#edit_time').val(),
+      remark: $('#edit_remark').val(),
+      default_bid: parseFloat($('#edit_default_bid').val()) || 0
+    }
+  };
+  fetch('/api/smart_quotes/edit', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data)
+  }).then(r => r.json()).then(res => {
+    if (res.success) {
+      flash('编辑成功', 'success');
+      $('#editModal').modal('hide');
+      loadTable();
+    } else {
+      flash('编辑失败', 'error');
+    }
+  });
+});
+
+// 删除
+$(document).on('click', '.delete-btn', function() {
+  if (confirm('确认删除?')) {
+    const id = $(this).data('id');
+    fetch('/api/smart_quotes/delete', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id: id})
+    }).then(r => r.json()).then(res => {
+      if (res.success) {
+        flash('删除成功', 'success');
+        loadTable();
+      } else {
+        flash('删除失败', 'error');
+      }
+    });
+  }
+});
+
+// 初始加载
+$(document).ready(function() {
+  loadTable();
+});
+</script>
+</body></html>

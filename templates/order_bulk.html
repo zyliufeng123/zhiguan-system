@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html><head><title>订单批量导入</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/custom.css') }}">
+<style>
+  .match-table { width: 100%; table-layout: fixed; font-size: 0.75em; word-break: break-word; }
+  .match-table th, .match-table td { padding: 0.25rem; border: 1px solid #dee2e6; vertical-align: top; word-break: break-word; }
+  .match-table th { width: 35%; background: #f8f9fa; }
+  .match-table td { width: 65%; }
+  .operation-col { padding: 0.5rem; text-align: center; }
+  .step-container { max-width: 90vw; overflow-x: auto; padding: 0.25rem; }
+  .main-content { margin-left: 250px; padding: 0.25rem; }
+  @media (max-width: 768px) { .sidebar { display: none !important; } .main-content { margin-left: 0 !important; padding: 0.25rem; } .match-table { font-size: 0.7em; } .match-table th, .match-table td { padding: 0.125rem; } }
+</style>
+</head><body>
+<!-- 顶部栏 -->
+<nav class="navbar navbar-expand-lg">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="#">智管</a>
+    <div class="navbar-nav ms-auto">
+      <a class="nav-link" href="/order">返回订单管理</a>
+      <a class="nav-link" href="/logout">退出</a>
+    </div>
+  </div>
+</nav>
+
+<!-- 左侧侧边栏 -->
+<div class="sidebar d-none d-lg-block">
+  <ul>
+    <li><a href="/smart_quote">智能报价</a></li>
+    <li><a href="/order">订单管理</a></li>
+    <li><a href="/inventory">库存管理</a></li>
+    <li><a href="/pivot">透视报表</a></li>
+    <li><a href="/settings">系统设置</a></li>
+  </ul>
+</div>
+
+<div class="container-fluid mt-3 main-content">
+  <div class="row">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header">订单批量导入</div>
+        <div class="card-body step-container">
+          {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+              {% for category, message in messages %}
+                <div class="alert alert-{{ 'success' if category == 'success' else 'danger' }} alert-dismissible fade show" role="alert">
+                  {{ message }}
+                  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+              {% endfor %}
+            {% endif %}
+          {% endwith %}
+          {% if step == 1 %}
+            <!-- Step1: 上传 -->
+            <form method="post" enctype="multipart/form-data">
+              <input type="hidden" name="step" value="1">
+              <div class="mb-1">
+                <label class="form-label">上传文件 (CSV/XLS/XLSX):</label>
+                <input type="file" name="file" accept=".csv,.xls,.xlsx" class="form-control" required>
+              </div>
+              <div class="text-center">
+                <input type="submit" value="解析表头" class="btn btn-primary btn-sm">
+              </div>
+            </form>
+          {% elif step == 2 %}
+            <!-- Step2: 匹配字段 -->
+            <form method="post" enctype="multipart/form-data">
+              <input type="hidden" name="step" value="2">
+              <input type="file" name="file" style="display:none;" accept=".csv,.xls,.xlsx">
+              <table class="match-table">
+                <thead><tr><th>您的表头列</th><th>匹配到系统字段</th></tr></thead>
+                <tbody>
+                  {% for header in headers %}
+                    <tr>
+                      <td class="header-col">{{ header }}</td>
+                      <td>
+                        <select name="match_{{ loop.index }}" class="form-select" id="select_{{ loop.index }}" style="font-size: 0.75em;">
+                          <option value="">忽略此列</option>
+                          <option value="type">类型 (销售/采购)</option>
+                          <option value="customer_name">客户名 (自动新增)</option>
+                          <option value="status">状态</option>
+                          <option value="product_name">产品名 (自动新增)</option>
+                          <option value="qty">数量</option>
+                          <option value="price">价格</option>
+                        </select>
+                        <input type="hidden" name="header_{{ loop.index }}" value="{{ header }}">
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+              <div class="operation-col mt-1">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="addNewField()">新增字段</button>
+                <p class="text-muted small mt-1 mb-0">多余列自动忽略</p>
+              </div>
+              <div class="mt-1 text-center">
+                <input type="submit" value="预览数据" class="btn btn-primary btn-sm">
+              </div>
+            </form>
+            <script>
+              // 加载动态字段
+              fetch('/api/bulk_fields').then(r => r.json()).then(fields => {
+                fields.forEach(f => {
+                  if (typeof f === 'object') {
+                    let opt = document.createElement('option');
+                    opt.value = f.name;
+                    opt.text = f.name + ' (' + f.type + ')';
+                    document.querySelectorAll('select[name^="match_"]').forEach(select => {
+                      select.appendChild(opt.cloneNode(true));
+                    });
+                  }
+                });
+              });
+              function addNewField() {
+                let newName = prompt('新字段名 (e.g. remark):');
+                let newType = prompt('类型 (str/float/int):');
+                if (newName && newType) {
+                  fetch('/api/fields/add', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({table: 'bulk_order', name: newName, type: newType})
+                  }).then(r => r.json()).then(data => {
+                    if (data.success) {
+                      let opt = document.createElement('option');
+                      opt.value = newName;
+                      opt.text = newName + ' (' + newType + ')';
+                      document.querySelectorAll('select[name^="match_"]').forEach(select => {
+                        select.appendChild(opt.cloneNode(true));
+                      });
+                      alert('新增 ' + newName + ' (' + newType + ') - 已立即可用');
+                    } else {
+                      alert('新增失败');
+                    }
+                  });
+                }
+              }
+            </script>
+          {% elif step == 3 %}
+            <!-- Step3: 预览 & 导入 -->
+            <h6>数据预览 (前5行，应用匹配)</h6>
+            <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+              <table class="table table-striped table-sm">
+                <thead><tr>{% for field in preview
