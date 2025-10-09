@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>批量导入 - 智能报价</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/custom.css') }}">
+</head>
+<body>
+    <!-- 顶部栏 -->
+    <nav class="navbar navbar-expand-lg">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">智管</a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="/smart_quote">返回列表</a>
+                <a class="nav-link" href="/logout">退出</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 左侧侧边栏 -->
+    <div class="sidebar d-none d-lg-block">
+        <ul>
+            <li><a href="/smart_quote">智能报价</a></li>
+            <li><a href="/order">订单管理</a></li>
+            <li><a href="/inventory">库存管理</a></li>
+            <li><a href="/pivot">透视报表</a></li>
+            <li><a href="/settings">系统设置</a></li>
+        </ul>
+    </div>
+
+    <div class="container-fluid mt-3" style="margin-left: 250px; padding: 20px;">
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <div class="alert alert-info">{{ messages[0] }}</div>
+            {% endif %}
+        {% endwith %}
+
+        <!-- 步骤1: 上传文件 -->
+        <div id="step1" class="card">
+            <div class="card-header">步骤1: 上传文件 (CSV/XLS/XLSX)</div>
+            <div class="card-body">
+                <form method="POST" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label class="form-label">选择文件</label>
+                        <input type="file" name="file" accept=".csv,.xls,.xlsx" class="form-control" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">下一步: 匹配列</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 步骤2: 匹配列 (后端POST后传columns) -->
+        {% if columns %}
+        <div id="step2" class="card mt-3">
+            <div class="card-header">步骤2: 匹配列 (检测列: {{ columns|join(', ') }})</div>
+            <div class="card-body">
+                <form method="POST">
+                    <input type="hidden" name="step" value="2">
+                    <div class="mb-3">
+                        <label>产品列 → product</label>
+                        <select name="map_product" class="form-control">
+                            <option value="">---</option>
+                            {% for col in columns %}
+                            <option value="{{ col }}">{{ col }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label>公司列 → company</label>
+                        <select name="map_company" class="form-control">
+                            <option value="">---</option>
+                            {% for col in columns %}
+                            <option value="{{ col }}">{{ col }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label>价格列 → price</label>
+                        <select name="map_price" class="form-control">
+                            <option value="">---</option>
+                            {% for col in columns %}
+                            <option value="{{ col }}">{{ col }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label>数量列 → qty</label>
+                        <select name="map_qty" class="form-control">
+                            <option value="">---</option>
+                            {% for col in columns %}
+                            <option value="{{ col }}">{{ col }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label>中标时间列 → bid_date (自动转str)</label>
+                        <select name="map_date" class="form-control">
+                            <option value="">---</option>
+                            {% for col in columns %}
+                            <option value="{{ col }}">{{ col }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label>备注列 → remarks</label>
+                        <select name="map_remarks" class="form-control">
+                            <option value="">---</option>
+                            {% for col in columns %}
+                            <option value="{{ col }}">{{ col }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label>默认中标价列 → default_bid</label>
+                        <select name="map_bid" class="form-control">
+                            <option value="">---</option>
+                            {% for col in columns %}
+                            <option value="{{ col }}">{{ col }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary">下一步: 预览</button>
+                    <a href="/smart_quote/bulk" class="btn btn-secondary">重来</a>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- 步骤3: 预览 -->
+        {% if preview_table %}
+        <div id="step3" class="card mt-3">
+            <div class="card-header">步骤3: 预览数据 (前5行)</div>
+            <div class="card-body">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>产品</th>
+                            <th>公司</th>
+                            <th>价格</th>
+                            <th>数量</th>
+                            <th>中标时间</th>
+                            <th>备注</th>
+                            <th>默认中标价</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in preview_table %}
+                        <tr>
+                            <td>{{ row.product or 'N/A' }}</td>
+                            <td>{{ row.company or 'N/A' }}</td>
+                            <td>{{ row.price or 0 }}</td>
+                            <td>{{ row.qty or 0 }}</td>
+                            <td>{{ row.bid_date or 'N/A' }}</td>
+                            <td>{{ row.remarks or '' }}</td>
+                            <td>{{ row.default_bid or 0 }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <form method="POST">
+                    <input type="hidden" name="step" value="3">
+                    <button type="submit" class="btn btn-success">导入所有数据</button>
+                    <a href="/smart_quote/bulk" class="btn btn-secondary">重来</a>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 简单JS切换步骤（后端POST后显示/隐藏，实际用class hide/show）
+        $(document).ready(function() {
+            if ($('#step2').length) {
+                $('#step1').hide();
+            }
+            if ($('#step3').length) {
+                $('#step1, #step2').hide();
+            }
+        });
+    </script>
+</body>
+</html>

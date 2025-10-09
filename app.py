@@ -112,18 +112,74 @@ def smart_quote_data():  # 无@login_required，AJAX独立session查
 @login_required
 def smart_quote_bulk():
     if request.method == 'POST':
-        file = request.files['file']
-        if file:
-            # 上传→匹配→预览→导入（Odoo式）
-            if file.filename.endswith(('.csv', '.xls', '.xlsx')):
-                df = pd.read_excel(file) if file.filename.endswith('.xls') or file.filename.endswith('.xlsx') else pd.read_csv(file)
-                # 自动新增产品/客户，日期转str
-                for _, row in df.iterrows():
-                    # 示例：conn.execute('INSERT OR IGNORE INTO products ...')
-                    pass  # 你的导入逻辑
-                flash('批量导入成功！')
-                return redirect(url_for('smart_quote'))
-    return render_template('smart_quote_bulk.html')
+        step = request.form.get('step', '1')
+        if step == '1':  # 上传
+            file = request.files.get('file')
+            if file and file.filename.lower().endswith(('.csv', '.xls', '.xlsx')):
+                try:
+                    if file.filename.endswith('.csv'):
+                        df = pd.read_csv(file, encoding='utf-8')
+                    else:
+                        df = pd.read_excel(file)
+                    # 日期转str
+                    date_cols = [col for col in df.columns if '日期' in col or 'date' in col or 'bid' in col]
+                    if date_cols:
+                        df[date_cols[0]] = pd.to_datetime(df[date_cols[0]], errors='coerce').dt.strftime('%Y-%m-%d')
+                    session['df_data'] = df.to_dict('records')  # 存session
+                    session['columns'] = df.columns.tolist()
+                    return render_template('smart_quote_bulk.html', columns=df.columns.tolist())
+                except Exception as e:
+                    flash(f'上传失败: {e}')
+            else:
+                flash('无效文件')
+        elif step == '2':  # 匹配
+            df_data = session.get('df_data', [])
+            # 映射 (request.form['map_product'] 等重命名df列)
+            map_dict = {
+                request.form.get('map_product', ''): 'product',
+                request.form.get('map_company', ''): 'company',
+                request.form.get('map_price', ''): 'price',
+                request.form.get('map_qty', ''): 'qty',
+                request.form.get('map_date', ''): 'bid_date',
+                request.form.get('map_remarks', ''): 'remarks',
+                request.form.get('map_bid', ''): 'default_bid'
+            }
+            # 预览前5行 (转dict，N/A默认)
+            preview_table = []
+            for row in df_data[:5]:
+                preview = {}
+                for old_col, new_col in map_dict.items():
+                    preview[new_col] = row.get(old_col, 'N/A')
+                preview_table.append(preview)
+            return render_template('smart_quote_bulk.html', preview_table=preview_table)
+        elif step == '3':  # 导入
+            df_data = session.get('df_data', [])
+            conn = get_db()
+            imported = 0
+            for row in df_data:
+                # 自动新增产品/客户
+                product = row.get('产品', row.get('product', ''))
+                if product:
+                    conn.execute('INSERT OR IGNORE INTO products (name) VALUES (?)', (product,))
+                company = row.get('公司', row.get('company', ''))
+                if company:
+                    conn.execute('INSERT OR IGNORE INTO customers (name) VALUES (?)', (company,))
+                # 插quotes (忽略隐藏列，如 if 'hidden' in row: continue)
+                conn.execute('''
+                    INSERT INTO quotes (product, company, price, qty, bid_date, remarks, default_bid)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (row.get('产品', row.get('product')), row.get('公司', row.get('company')), 
+                      row.get('价格', row.get('price')), row.get('数量', row.get('qty')), 
+                      row.get('日期', row.get('bid_date')), row.get('备注', row.get('remarks')), 
+                      row.get('默认中标价', row.get('default_bid'))))
+                imported += 1
+            conn.commit()
+            conn.close()
+            flash(f'成功导入 {imported} 行！')
+            session.pop('df_data', None)
+            session.pop('columns', None)
+            return redirect(url_for('smart_quote'))
+    return render_template('smart_quote_bulk.html')  # GET: 步1
 
 @app.route('/formula', methods=['GET', 'POST'])
 @login_required
@@ -168,40 +224,40 @@ def order():
     customer_filter = request.args.get('customer', '')
     status_filter = request.args.get('status', '')
     
-    query = '''
-    SELECT o.*, c.name as customer_name 
-    FROM orders o 
-    LEFT JOIN customers c ON o.customer_id = c.id 
-    WHERE 1=1
-    '''
+    query = 'SELECT * FROM orders WHERE 1=1'
     params = []
     if type_filter:
-        query += ' AND o.type = ?'
+        query += ' AND type = ?'
         params.append(type_filter)
     if date_from:
-        query += ' AND o.date >= ?'
+        query += ' AND date >= ?'
         params.append(date_from)
     if date_to:
-        query += ' AND o.date <= ?'
+        query += ' AND date <= ?'
         params.append(date_to)
     if customer_filter:
-        query += ' AND c.name LIKE ?'
+        query += ' AND customer LIKE ?'
         params.append(f'%{customer_filter}%')
     if status_filter:
-        query += ' AND o.status = ?'
+        query += ' AND status = ?'
         params.append(status_filter)
     
     orders = conn.execute(query, params).fetchall()
     
-    # 下拉：类型/状态/客户
+    # 下拉数据
     types = [('销售', '销售'), ('采购', '采购')]
     statuses = [('待确认', '待确认'), ('已确认', '已确认'), ('完成', '完成')]
-    customers = conn.execute('SELECT id, name FROM customers').fetchall()
+    customers = conn.execute('SELECT name FROM customers').fetchall()  # 简单list
     
     conn.close()
-    return render_template('order.html', orders=orders, types=types, statuses=statuses, customers=customers)
+    # 加这行（计算当前日期）
+    from datetime import datetime  # 如果顶部无，加import
+    current_date = datetime.now().strftime('%Y-%m-%d')
 
-@app.route('/order/data', methods=['GET'])  # AJAX JSON（修复警告核心）
+# 原return改
+    return render_template('order.html', orders=orders, types=types, statuses=statuses, customers=customers, current_date=current_date)
+
+@app.route('/order/data', methods=['GET'])
 def order_data():
     if 'user' not in session:
         return jsonify({"error": "Unauthorized", "data": []}), 401
@@ -213,32 +269,28 @@ def order_data():
         customer_filter = request.args.get('customer', '')
         status_filter = request.args.get('status', '')
         
-        query = '''
-        SELECT o.*, c.name as customer_name 
-        FROM orders o LEFT JOIN customers c ON o.customer_id = c.id 
-        WHERE 1=1
-        '''
+        query = 'SELECT * FROM orders WHERE 1=1'
         params = []
         if type_filter:
-            query += ' AND o.type = ?'
+            query += ' AND type = ?'
             params.append(type_filter)
         if date_from:
-            query += ' AND o.date >= ?'
+            query += ' AND date >= ?'
             params.append(date_from)
         if date_to:
-            query += ' AND o.date <= ?'
+            query += ' AND date <= ?'
             params.append(date_to)
         if customer_filter:
-            query += ' AND c.name LIKE ?'
+            query += ' AND customer LIKE ?'
             params.append(f'%{customer_filter}%')
         if status_filter:
-            query += ' AND o.status = ?'
+            query += ' AND status = ?'
             params.append(status_filter)
         
         data = conn.execute(query, params).fetchall()
         conn.close()
         json_data = [dict(row) for row in data]
-        print(f"订单JSON数据: {len(json_data)} 行")  # 调试
+        print(f"订单JSON数据: {len(json_data)} 行")  # 终端调试
         return jsonify(json_data)
     except Exception as e:
         print(f"订单AJAX错误: {e}")
@@ -360,39 +412,7 @@ def order_bulk():
             flash(f'批量导入 {imported} 订单！')
             return redirect(url_for('order'))
     return render_template('order_bulk.html')  # 向导：上传/预览/导入
-
-# ========== 订单管理模块（保持不变） ==========
-@app.route('/order', methods=['GET', 'POST'])
-@login_required
-def order():
-    conn = get_db()
-    # 筛选：类型/日期/客户/状态
-    type_filter = request.args.get('type', '')
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
-    customer_filter = request.args.get('customer', '')
-    status_filter = request.args.get('status', '')
     
-    query = 'SELECT * FROM orders WHERE 1=1'
-    params = []
-    if type_filter:
-        query += ' AND type = ?'
-        params.append(type_filter)
-    # ... 类似其他筛选
-    orders = conn.execute(query, params).fetchall()
-    conn.close()
-    return render_template('order.html', orders=orders)
-
-@app.route('/order/bulk', methods=['GET', 'POST'])
-@login_required
-def order_bulk():
-    # 你的批量逻辑：导入明细，自动新增，总价sum
-    if request.method == 'POST':
-        # 示例导入
-        flash('订单批量导入成功！')
-        return redirect(url_for('order'))
-    return render_template('order_bulk.html')
-
 # ========== 整体导航/错误处理（新增，确保页面不丢） ==========
 @app.route('/<path:path>')
 @login_required
@@ -410,6 +430,12 @@ if __name__ == '__main__':
                     (id INTEGER PRIMARY KEY, type TEXT, customer TEXT, date TEXT, total_price REAL, 
                      status TEXT, details_count INTEGER)''')
     conn.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
+   # 客户表（订单联表）
+    conn.execute('''CREATE TABLE IF NOT EXISTS customers 
+                (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE)''')
+# 样例客户
+    conn.execute("INSERT OR IGNORE INTO customers (name) VALUES ('ABC公司')")
+    conn.execute("INSERT OR IGNORE INTO customers (name) VALUES ('DEF公司')")
     conn.commit()
     conn.close()
     app.run(debug=True, port=5000)

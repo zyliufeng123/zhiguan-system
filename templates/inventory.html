@@ -4,99 +4,324 @@
     <meta charset="UTF-8">
     <title>库存管理</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/custom.css') }}">
+    <!-- DataTables CSS -->
+    <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.11.5/css/jquery.dataTables.min.css">
+    <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/buttons/2.2.2/css/buttons.dataTables.min.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.2.2/js/dataTables.buttons.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.53/pdfmake.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.53/vfs_fonts.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.2.2/js/buttons.html5.min.js"></script>
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-light bg-light">
-        <ul class="navbar-nav">
-            <li><a href="{{ url_for('dashboard') }}" class="nav-link">仪表板</a></li>
-            <li><a href="{{ url_for('smart_quote') }}" class="nav-link">智能报价</a></li>
-            <li><a href="{{ url_for('order') }}" class="nav-link">订单管理</a></li>
-            <li><a href="{{ url_for('inventory') }}" class="nav-link active">库存管理</a></li>
-            <!-- 待加：报表/设置 -->
-        </ul>
-    </nav>
-    <div class="container mt-4">
-        {% with messages = get_flashed_messages() %}
-            {% if messages %}
-                <div class="alert alert-info">{{ messages[0] }}</div>
-            {% endif %}
-        {% endwith %}
-        <!-- 顶部筛选+新增模态 -->
-        <form method="GET">
-            <div class="row">
-                <div class="col"><input type="text" name="warehouse" placeholder="仓库" value="{{ request.args.get('warehouse', '') }}" class="form-control"></div>
-                <div class="col"><input type="text" name="category" placeholder="分类" value="{{ request.args.get('category', '') }}" class="form-control"></div>
-                <div class="col"><input type="text" name="product" placeholder="产品" value="{{ request.args.get('product', '') }}" class="form-control"></div>
-                <button type="submit" class="btn btn-primary">筛选</button>
+    <!-- 顶部栏 -->
+    <nav class="navbar navbar-expand-lg">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">智管</a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="/logout">退出</a>
             </div>
-        </form>
-        <button class="btn btn-success mt-2" data-bs-toggle="modal" data-bs-target="#addModal">新增库存</button>
-        
-        <!-- 新增模态 -->
-        <div class="modal fade" id="addModal">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <form method="POST" action="{{ url_for('add_inventory') }}">
-                        <div class="modal-header"><h5>新增库存</h5></div>
-                        <div class="modal-body">
-                            <select name="warehouse_id" class="form-control mb-2">
-                                {% for w in warehouses %}<option value="{{ w['id'] }}">{{ w['name'] }}</option>{% endfor %}
-                            </select>
-                            <select name="category_id" class="form-control mb-2">
-                                {% for c in categories %}<option value="{{ c['id'] }}">{{ c['name'] }}</option>{% endfor %}
-                            </select>
-                            <select name="product_id" class="form-control mb-2">
-                                {% for p in products %}<option value="{{ p['id'] }}">{{ p['name'] }}</option>{% endfor %}
-                            </select>
-                            <input type="number" name="qty" placeholder="数量" class="form-control" required>
+        </div>
+    </nav>
+
+    <!-- 左侧侧边栏 -->
+    <div class="sidebar d-none d-lg-block">
+        <ul>
+            <li><a href="/smart_quote">智能报价</a></li>
+            <li><a href="/order">订单管理</a></li>
+            <li><a href="/inventory">库存管理</a></li>
+            <li><a href="/pivot">透视报表</a></li>
+            <li><a href="/settings">系统设置</a></li>
+        </ul>
+    </div>
+
+    <div class="container-fluid mt-3" style="margin-left: 250px; padding: 20px;">
+        <h2>库存管理</h2>
+        <div class="row mb-3">
+            <div class="col-md-8">
+                <!-- 筛选表单 -->
+                <form id="filterForm">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <label>仓库:</label>
+                            <input type="text" id="warehouse_q" class="form-control" placeholder="输入检索">
                         </div>
-                        <div class="modal-footer">
-                            <button type="submit" class="btn btn-primary">保存</button>
+                        <div class="col-md-3">
+                            <label>分类:</label>
+                            <input type="text" id="category_q" class="form-control" placeholder="输入检索">
+                        </div>
+                        <div class="col-md-3">
+                            <label>产品:</label>
+                            <input type="text" id="product_q" class="form-control" placeholder="输入检索">
+                        </div>
+                        <div class="col-md-3">
+                            <label>数量阈值:</label>
+                            <input type="number" id="qty_threshold" class="form-control" placeholder="低库存警戒" value="10">
+                        </div>
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-md-12 text-end">
+                            <button type="button" id="resetBtn" class="btn btn-secondary">重置</button>
+                            <button type="button" id="filterBtn" class="btn btn-primary">筛选</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="col-md-4 text-end">
+                <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addModal">新增库存</button>
+            </div>
+        </div>
+
+        <!-- 列表 -->
+        <div class="row">
+            <div class="col-12">
+                <table id="inventoryTable" class="table table-striped" style="width:100%">
+                    <thead>
+                        <tr>
+                            <th>仓库</th>
+                            <th>分类</th>
+                            <th>产品</th>
+                            <th>数量</th>
+                            <th>更新时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新增模态窗 -->
+    <div class="modal fade" id="addModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">新增库存</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addForm">
+                        <div class="mb-2">
+                            <label>仓库:</label>
+                            <select id="add_warehouse" class="form-control">
+                                <option value="">选择仓库</option>
+                                {% for w in warehouses %}
+                                <option value="{{ w['id'] }}">{{ w['name'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-2">
+                            <label>分类:</label>
+                            <select id="add_category" class="form-control">
+                                <option value="">选择分类</option>
+                                {% for c in categories %}
+                                <option value="{{ c['id'] }}">{{ c['name'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-2">
+                            <label>产品:</label>
+                            <select id="add_product" class="form-control">
+                                <option value="">选择产品</option>
+                                {% for p in products %}
+                                <option value="{{ p['id'] }}">{{ p['name'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-2">
+                            <label>数量:</label>
+                            <input type="number" id="add_qty" class="form-control" placeholder="库存数量" required>
                         </div>
                     </form>
                 </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" id="saveAdd" class="btn btn-primary">保存</button>
+                </div>
             </div>
         </div>
-        
-        <!-- 列表 -->
-        <table id="inventoryTable" class="table table-striped mt-3">
-            <thead><tr><th>仓库</th><th>分类</th><th>产品</th><th>数量</th><th>更新时间</th><th>操作</th></tr></thead>
-            <tbody>
-                {% for item in items %}
-                <tr>
-                    <td>{{ item['warehouse_name'] or '' }}</td>
-                    <td>{{ item['category_name'] or '' }}</td>
-                    <td>{{ item['product_name'] or '' }}</td>
-                    <td>{{ item['qty'] }} {% if item['qty'] < 10 %}<span class="text-danger">低库存!</span>{% endif %}</td>
-                    <td>{{ item['last_update'] }}</td>
-                    <td>
-                        <button class="btn btn-sm btn-warning" onclick="editModal({{ item['id'] }})">编辑</button>
-                        <a href="{{ url_for('delete_inventory', id=item['id']) }}" class="btn btn-sm btn-danger" onclick="return confirm('删?')">删</a>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        <button onclick="exportCSV()" class="btn btn-success">导出CSV</button>
     </div>
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
-    <script src="https://cdn.datatables.net/1.11.5/js/dataTables.bootstrap5.min.js"></script>
+
+    <!-- 编辑模态窗 -->
+    <div class="modal fade" id="editModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">编辑库存</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editForm">
+                        <input type="hidden" id="edit_id">
+                        <div class="mb-2">
+                            <label>仓库:</label>
+                            <select id="edit_warehouse" class="form-control">
+                                <option value="">选择仓库</option>
+                                {% for w in warehouses %}
+                                <option value="{{ w['id'] }}">{{ w['name'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-2">
+                            <label>分类:</label>
+                            <select id="edit_category" class="form-control">
+                                <option value="">选择分类</option>
+                                {% for c in categories %}
+                                <option value="{{ c['id'] }}">{{ c['name'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-2">
+                            <label>产品:</label>
+                            <select id="edit_product" class="form-control">
+                                <option value="">选择产品</option>
+                                {% for p in products %}
+                                <option value="{{ p['id'] }}">{{ p['name'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-2">
+                            <label>数量:</label>
+                            <input type="number" id="edit_qty" class="form-control" placeholder="库存数量" required>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" id="saveEdit" class="btn btn-primary">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
-        $(document).ready(function() {
-            $('#inventoryTable').DataTable({
-                ajax: '/inventory/data',
-                paging: true, sorting: true
-            });
+    var table;  // 全局var，避免重申
+
+    // 加载列表
+    function loadTable() {
+        const warehouse_q = $('#warehouse_q').val();
+        const category_q = $('#category_q').val();
+        const product_q = $('#product_q').val();
+        const threshold = $('#qty_threshold').val() || 10;
+
+        table = $('#inventoryTable').DataTable({
+            destroy: true,
+            ajax: {
+                url: '/inventory/data',
+                data: function(d) {
+                    d.warehouse = warehouse_q;
+                    d.category = category_q;
+                    d.product = product_q;
+                },
+                dataSrc: function(json) {
+                    if (json.error) {
+                        alert('会话过期或错误: ' + json.error + '，请重新登录');
+                        window.location.href = '/login?from=inventory';
+                        return [];
+                    }
+                    return json;
+                }
+            },
+            columns: [
+                { data: 'warehouse_name' },
+                { data: 'category_name' },
+                { data: 'product_name' },
+                { data: 'qty', render: function(data, type, row) {
+                    const low = data < threshold ? ' <span class="text-danger">低库存!</span>' : '';
+                    return data + low;
+                } },
+                { data: 'last_update' },
+                { data: null, orderable: false, render: function(data, type, row) {
+                    return '<button class="btn btn-sm btn-warning edit-btn" data-id="' + row.id + '">编辑</button> <a href="/inventory/delete/' + row.id + '" class="btn btn-sm btn-danger" onclick="return confirm(\'确认删除?\')">删</a>';
+                } }
+            ],
+            pageLength: 10,
+            lengthMenu: [10, 25, 50],
+            dom: 'Bfrtip',
+            buttons: ['copy', 'csv', 'excel', 'pdf', 'print']
         });
-        function exportCSV() { window.location = '/inventory/export'; }  // 加导出路由如果需
-        function editModal(id) {
-            // AJAX拉数据填模态，类似addModal但action=update/id
-            // 简化：重定向或JS fetch
-            alert('编辑ID:' + id);  // 扩展用
+    }
+
+    // 筛选
+    $('#filterBtn').click(loadTable);
+
+    // 重置
+    $('#resetBtn').click(function() {
+        $('#warehouse_q, #category_q, #product_q, #qty_threshold').val('');
+        loadTable();
+    });
+
+    // 新增保存
+    $('#saveAdd').click(function() {
+        const data = {
+            warehouse_id: $('#add_warehouse').val(),
+            category_id: $('#add_category').val(),
+            product_id: $('#add_product').val(),
+            qty: parseInt($('#add_qty').val()) || 0
+        };
+        if (!data.warehouse_id || !data.category_id || !data.product_id || !data.qty) {
+            alert('请填写完整');
+            return;
         }
+        fetch('/inventory/add', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        }).then(r => r.json()).then(res => {
+            if (res.success) {
+                alert('新增成功');
+                $('#addModal').modal('hide');
+                loadTable();
+            } else {
+                alert('新增失败: ' + res.error);
+            }
+        });
+    });
+
+    // 编辑
+    $(document).on('click', '.edit-btn', function() {
+        const id = $(this).data('id');
+        fetch('/inventory/' + id).then(r => r.json()).then(data => {
+            $('#edit_id').val(data.id);
+            $('#edit_warehouse').val(data.warehouse_id);
+            $('#edit_category').val(data.category_id);
+            $('#edit_product').val(data.product_id);
+            $('#edit_qty').val(data.qty);
+            new bootstrap.Modal(document.getElementById('editModal')).show();
+        });
+    });
+
+    // 编辑保存
+    $('#saveEdit').click(function() {
+        const data = {
+            id: $('#edit_id').val(),
+            warehouse_id: $('#edit_warehouse').val(),
+            category_id: $('#edit_category').val(),
+            product_id: $('#edit_product').val(),
+            qty: parseInt($('#edit_qty').val()) || 0
+        };
+        fetch('/inventory/update/' + data.id, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        }).then(r => r.json()).then(res => {
+            if (res.success) {
+                alert('编辑成功');
+                $('#editModal').modal('hide');
+                loadTable();
+            } else {
+                alert('编辑失败: ' + res.error);
+            }
+        });
+    });
+
+    // 初始加载
+    $(document).ready(function() {
+        loadTable();
+    });
     </script>
 </body>
 </html>
