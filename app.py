@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, jsonify, flash, redirect, url_for, session
 import sqlite3
+import json
 import pandas as pd
 from datetime import datetime
 import os
@@ -290,7 +291,7 @@ def order_data():
         data = conn.execute(query, params).fetchall()
         conn.close()
         json_data = [dict(row) for row in data]
-        print(f"订单JSON数据: {len(json_data)} 行")  # 终端调试
+        print(f"订单JSON数据: {len(json_data)} 行")
         return jsonify(json_data)
     except Exception as e:
         print(f"订单AJAX错误: {e}")
@@ -299,84 +300,53 @@ def order_data():
 @app.route('/order/add', methods=['POST'])
 @login_required
 def add_order():
-    conn = get_db()
-    customer_name = request.form['customer']
-    # 自动新增客户
-    cursor = conn.execute('SELECT id FROM customers WHERE name = ?', (customer_name,))
-    row = cursor.fetchone()
-    if not row:
-        conn.execute('INSERT INTO customers (name) VALUES (?)', (customer_name,))
-        customer_id = conn.lastrowid
-    else:
-        customer_id = row[0]
-    
-    # 总价sum（假设明细从form details_json JSON解析）
-    details_json = request.form.get('details_json', '[]')
-    import json
-    details = json.loads(details_json) if details_json else []
-    total_price = sum(float(d.get('price', 0) * d.get('qty', 0)) for d in details)
-    details_count = len(details)
-    
-    conn.execute('''
-        INSERT INTO orders (type, customer_id, date, total_price, status, details_count)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (request.form['type'], customer_id, request.form['date'], total_price, request.form['status'], details_count))
-    
-    # 插明细 (order_details表)
-    order_id = conn.lastrowid
-    for d in details:
-        product_name = d['product']
-        # 自动新增产品
-        cursor = conn.execute('SELECT id FROM products WHERE name = ?', (product_name,))
-        p_row = cursor.fetchone()
-        if not p_row:
-            conn.execute('INSERT INTO products (name) VALUES (?)', (product_name,))
-            product_id = conn.lastrowid
-        else:
-            product_id = p_row[0]
-        conn.execute('INSERT INTO order_details (order_id, product_id, qty, price) VALUES (?, ?, ?, ?)',
-                     (order_id, product_id, d['qty'], d['price']))
-    
-    conn.commit()
-    conn.close()
-    flash('订单新增成功！')
-    return redirect(url_for('order'))
+    print('后端add_order触发')  # 调试
+    try:
+        data = request.json
+        print('接收数据', data)  # 调试
+        type_ = data['type']
+        customer = data['customer']
+        date = data['date']
+        status = data['status']
+        details_json = data['details_json']
+        details = json.loads(details_json)
+        total_price = sum(float(d.get('price', 0) * d.get('qty', 0)) for d in details)
+        details_count = len(details)
+        
+        conn = get_db()
+        conn.execute('INSERT INTO orders (type, customer, date, total_price, status, details_count) VALUES (?, ?, ?, ?, ?, ?)',
+                     (type_, customer, date, total_price, status, details_count))
+        conn.commit()
+        conn.close()
+        print('新增成功')  # 调试
+        return jsonify({"success": True})
+    except Exception as e:
+        print(f"新增订单错误: {e}")  # 调试
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/order/update/<int:id>', methods=['POST'])
 @login_required
 def update_order(id):
-    conn = get_db()
-    # 类似add，更新总价
-    details_json = request.form.get('details_json', '[]')
-    details = json.loads(details_json)
-    total_price = sum(float(d.get('price', 0) * d.get('qty', 0)) for d in details)
-    details_count = len(details)
-    
-    conn.execute('''
-        UPDATE orders SET type=?, customer_id=?, date=?, total_price=?, status=?, details_count=?
-        WHERE id=?
-    ''', (request.form['type'], request.form['customer_id'], request.form['date'], total_price, request.form['status'], details_count, id))
-    
-    # 更新明细 (删旧加新)
-    conn.execute('DELETE FROM order_details WHERE order_id = ?', (id,))
-    for d in details:
-        # 类似add，自动新增产品
-        product_name = d['product']
-        cursor = conn.execute('SELECT id FROM products WHERE name = ?', (product_name,))
-        p_row = cursor.fetchone()
-        if not p_row:
-            conn.execute('INSERT INTO products (name) VALUES (?)', (product_name,))
-            product_id = conn.lastrowid
-        else:
-            product_id = p_row[0]
-        conn.execute('INSERT INTO order_details (order_id, product_id, qty, price) VALUES (?, ?, ?, ?)',
-                     (id, product_id, d['qty'], d['price']))
-    
-    conn.commit()
-    conn.close()
-    flash('订单更新成功！')
-    return redirect(url_for('order'))
-
+    try:
+        conn = get_db()
+        data = request.json  # 改这里
+        type_ = data['type']
+        customer = data['customer']
+        date = data['date']
+        status = data['status']
+        details_json = data['details_json']
+        details = json.loads(details_json)
+        total_price = sum(float(d.get('price', 0) * d.get('qty', 0)) for d in details)
+        details_count = len(details)
+        
+        conn.execute('UPDATE orders SET type=?, customer=?, date=?, total_price=?, status=?, details_count=? WHERE id=?',
+                     (type_, customer, date, total_price, status, details_count, id))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True})
+    except Exception as e:
+        print(f"更新订单错误: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 @app.route('/order/delete/<int:id>')
 @login_required
 def delete_order(id):
@@ -436,6 +406,20 @@ if __name__ == '__main__':
 # 样例客户
     conn.execute("INSERT OR IGNORE INTO customers (name) VALUES ('ABC公司')")
     conn.execute("INSERT OR IGNORE INTO customers (name) VALUES ('DEF公司')")
+        # 客户/产品/订单明细表
+    conn.execute('''CREATE TABLE IF NOT EXISTS customers 
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE)''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS products 
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE)''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS order_details 
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER, product_id INTEGER, qty INTEGER, price REAL)''')
+
+    # 样例数据
+    conn.execute("INSERT OR IGNORE INTO customers (name) VALUES ('ABC公司')")
+    conn.execute("INSERT OR IGNORE INTO customers (name) VALUES ('DEF公司')")
+    conn.execute("INSERT OR IGNORE INTO products (name) VALUES ('苹果手机')")
+    conn.execute("INSERT OR IGNORE INTO products (name) VALUES ('三星电视')")
+    conn.execute("INSERT OR IGNORE INTO order_details (order_id, product_id, qty, price) VALUES (1, 1, 10, 5000.0)")
     conn.commit()
     conn.close()
     app.run(debug=True, port=5000)
@@ -529,10 +513,6 @@ def delete_inventory(id):
     flash('库存删除成功！')
     return redirect(url_for('inventory'))
 
-# 订单确认时联动：扣/增QTY（示例：在order确认路由加钩子）
-# e.g., 在order() POST确认时：
-# conn.execute('UPDATE inventory SET qty = qty - ? WHERE product_id = ? AND warehouse_id = ?', (details_qty, product_id, warehouse_id))
-# 负库存闪警戒：if new_qty < 0: flash('低库存警戒！')
 
 # DB表创建（加到if __name__ CREATE后）
 conn = get_db()
