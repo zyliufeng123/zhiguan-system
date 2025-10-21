@@ -47,7 +47,8 @@ if 'app' not in globals() or globals().get('app') is None:
 app.config.setdefault('UPLOAD_FOLDER', UPLOAD_FOLDER)
 
 # 添加：会话密钥与上传限制（请在生产环境通过环境变量设置 SECRET_KEY）
-app.config.setdefault('SECRET_KEY', os.environ.get('SECRET_KEY', 'dev-secret-change-me'))
+import secrets
+app.config['SECRET_KEY'] = secrets.token_hex(16)
 app.config.setdefault('MAX_CONTENT_LENGTH', MAX_UPLOAD_SIZE)
 
 # 数据库路径与简单 get_db 实现
@@ -233,21 +234,31 @@ def logout():
     flash('已登出')
     return redirect(url_for('login'))
 
-# ========== 仪表盘 ==========
-@app.route('/')
+# 添加这个缺失的dashboard路由
+@app.route('/dashboard')
 @login_required
 def dashboard():
-    conn = get_db()
     try:
-        quote_count = conn.execute('SELECT COUNT(*) FROM quotes').fetchone()[0]
-    except Exception:
-        quote_count = 0
-    try:
-        order_count = conn.execute('SELECT COUNT(*) FROM orders').fetchone()[0]
-    except Exception:
-        order_count = 0
-    conn.close()
-    return render_template('dashboard.html', quotes=quote_count, orders=order_count)
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 获取基础统计数据
+        try:
+            quote_count = cur.execute('SELECT COUNT(*) FROM quotes').fetchone()[0]
+        except:
+            quote_count = 0
+            
+        try:
+            order_count = cur.execute('SELECT COUNT(*) FROM orders').fetchone()[0]
+        except:
+            order_count = 0
+            
+        conn.close()
+        
+        return render_template('dashboard.html', quotes=quote_count, orders=order_count)
+    except Exception as e:
+        return f"Dashboard页面: {str(e)}", 500
+
 
 # ========== 智能报价（页面/数据/批量） ==========
 @app.route('/smart_quote')
@@ -289,44 +300,80 @@ def smart_quote_data():
 @login_required
 def smart_quote_bulk():
     if request.method == 'GET':
+        # 检查是否有temp_id参数，如果有则显示映射界面
+        temp_id = request.args.get('temp_id')
+        if temp_id:
+            # 从文件读取数据并显示映射界面
+            filepath = _locate_temp_file(temp_id)
+            if filepath:
+                try:
+                    if pd is None:
+                        flash('系统缺少pandas库，无法处理Excel/CSV文件')
+                        return render_template('smart_quote_bulk.html')
+                        
+                    if filepath.lower().endswith('.csv'):
+                        df = pd.read_csv(filepath, encoding='utf-8')
+                    else:
+                        df = pd.read_excel(filepath)
+                    
+                    preview_data = df.head(5).to_dict('records')
+                    columns = df.columns.tolist()
+                    filename = os.path.basename(filepath).replace(f"{temp_id}_", "", 1)
+                    
+                    return render_template('smart_quote_bulk.html', 
+                                          temp_id=temp_id,
+                                          temp_file_name=filename,
+                                          columns=columns,
+                                          preview_data=preview_data)
+                except Exception as e:
+                    flash(f'读取文件错误: {str(e)}')
+        
         return render_template('smart_quote_bulk.html')
     
-    # 处理文件上传
-    if 'file' not in request.files:
-        flash('未选择文件')
-        return redirect(request.url)
-    
-    file = request.files['file']
-    if file.filename == '':
-        flash('未选择文件')
-        return redirect(request.url)
-    
-    # 保存临时文件
-    filename = secure_filename(file.filename)
-    temp_id = str(uuid.uuid4())
-    temp_path = os.path.join(UPLOAD_FOLDER, f"{temp_id}_{filename}")
-    file.save(temp_path)
-    
-    # 读取文件内容
+    # POST请求处理 - 处理文件上传
     try:
-        import pandas as pd
+        if 'file' not in request.files:
+            flash('未选择文件')
+            return redirect(request.url)
+        
+        file = request.files['file']
+        if file.filename == '':
+            flash('未选择文件')
+            return redirect(request.url)
+        
+        # 检查pandas
+        if pd is None:
+            flash('系统缺少pandas库，无法处理Excel/CSV文件')
+            return redirect(request.url)
+        
+        # 保存临时文件
+        filename = secure_filename(file.filename)
+        temp_id = str(uuid.uuid4())
+        temp_path = os.path.join(UPLOAD_FOLDER, f"{temp_id}_{filename}")
+        file.save(temp_path)
+        
+        # 读取文件内容
         if filename.lower().endswith('.csv'):
-            df = pd.read_csv(temp_path)
+            df = pd.read_csv(temp_path, encoding='utf-8')
         else:
             df = pd.read_excel(temp_path)
             
-        # 显示预览界面
+        # 准备数据传递给模板
         preview_data = df.head(5).to_dict('records')
+        columns = df.columns.tolist()
+        
+        # 直接返回带有数据的页面，显示映射界面
         return render_template('smart_quote_bulk.html', 
-                              columns=df.columns.tolist(),
-                              preview_data=preview_data,
                               temp_id=temp_id,
-                              temp_file_name=filename)
+                              temp_file_name=filename,
+                              columns=columns,
+                              preview_data=preview_data)
                               
     except Exception as e:
+        logger.exception("文件上传处理错误")
         flash(f'处理文件错误: {str(e)}')
         return redirect(request.url)
-
+    
 @app.route('/api/companies')
 @login_required
 def api_companies():
@@ -376,6 +423,104 @@ def api_smart_quote_delete():
     conn.commit()
     conn.close()
     return jsonify({"success": True})
+
+@app.route('/smart_quote/bulk/import', methods=['POST'])
+@login_required
+def smart_quote_bulk_import():
+    """处理智能报价批量导入的映射配置"""
+    try:
+        temp_id = request.form.get('temp_id')
+        product_col = request.form.get('product_col')
+        price_col = request.form.get('price_col')
+        company_col = request.form.get('company_col')
+        date_col = request.form.get('date_col')
+        qty_col = request.form.get('qty_col')
+        conflict_mode = request.form.get('conflict_mode', 'skip')
+        
+        if not temp_id or not product_col or not price_col or not company_col:
+            flash('请完整填写必填字段')
+            return redirect(url_for('smart_quote_bulk'))
+        
+        # 查找临时文件
+        filepath = _locate_temp_file(temp_id)
+        if not filepath:
+            flash('临时文件不存在或已过期')
+            return redirect(url_for('smart_quote_bulk'))
+        
+        # 读取文件并执行导入
+        if pd is None:
+            flash('系统缺少pandas库，无法处理文件')
+            return redirect(url_for('smart_quote_bulk'))
+        
+        if filepath.lower().endswith('.csv'):
+            df = pd.read_csv(filepath, encoding='utf-8')
+        else:
+            df = pd.read_excel(filepath)
+        
+        # 执行导入逻辑
+        conn = get_db()
+        cur = conn.cursor()
+        
+        success_count = 0
+        error_count = 0
+        
+        for idx, row in df.iterrows():
+            try:
+                product_name = str(row.get(product_col, '')).strip()
+                company_name = str(row.get(company_col, '')).strip()
+                price_value = _parse_number(row.get(price_col))
+                
+                if not product_name or not company_name or price_value is None:
+                    error_count += 1
+                    continue
+                
+                # 获取其他字段
+                bid_date = str(row.get(date_col, '')).strip() if date_col else datetime.now().strftime('%Y-%m-%d')
+                qty = _parse_number(row.get(qty_col)) if qty_col else 1
+                
+                # 检查是否已存在
+                if conflict_mode == 'skip':
+                    existing = cur.execute(
+                        'SELECT id FROM quotes WHERE product=? AND company=? AND bid_date=?',
+                        (product_name, company_name, bid_date)
+                    ).fetchone()
+                    if existing:
+                        continue
+                
+                # 插入或更新记录
+                if conflict_mode == 'overwrite':
+                    cur.execute('''
+                        INSERT OR REPLACE INTO quotes (product, company, price, qty, bid_date, remarks)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    ''', (product_name, company_name, price_value, qty or 1, bid_date, f'批量导入_{temp_id[:8]}'))
+                else:
+                    cur.execute('''
+                        INSERT INTO quotes (product, company, price, qty, bid_date, remarks)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    ''', (product_name, company_name, price_value, qty or 1, bid_date, f'批量导入_{temp_id[:8]}'))
+                
+                success_count += 1
+                
+            except Exception as e:
+                error_count += 1
+                logger.exception(f"导入第{idx+1}行时出错: {str(e)}")
+        
+        conn.commit()
+        conn.close()
+        
+        # 清理临时文件
+        try:
+            os.remove(filepath)
+        except:
+            pass
+        
+        flash(f'导入完成！成功: {success_count} 条，失败: {error_count} 条')
+        return redirect(url_for('smart_quote'))
+        
+    except Exception as e:
+        logger.exception("批量导入错误")
+        flash(f'导入失败: {str(e)}')
+        return redirect(url_for('smart_quote_bulk'))
 
 # ========== 公式（安全执行） ==========
 @app.route('/formula', methods=['GET', 'POST'])
@@ -679,6 +824,28 @@ def pivot():
         data = []
     return render_template('pivot.html', data=data)
 
+@app.route('/settings')
+@login_required
+def settings():
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 获取所有设置
+        cur.execute('SELECT * FROM settings')
+        settings_dict = {row['key']: row['value'] for row in cur.fetchall()}
+        
+        conn.close()
+        return render_template('settings.html', settings=settings_dict)
+    except Exception as e:
+        return f"设置页面: {str(e)}", 500
+    
+    # 添加缺失的import_upload_page路由
+@app.route('/import')
+@login_required
+def import_upload_page():
+    return render_template('import_upload.html')
+
 # 启动时确保表存在
 def ensure_tables():
     conn = get_db()
@@ -726,153 +893,6 @@ def ensure_tables():
 # 确保在模块加载时初始化表（方便直接用 python app.py 启动）
 ensure_tables()
 
-# --- 视图路由 ---
-
-@app.route('/')
-@login_required
-def index():
-    return redirect(url_for('dashboard'))
-
-@app.route('/dashboard')
-@login_required
-def dashboard():
-    return render_template('dashboard.html')
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        # 简单演示登录，生产环境应使用安全密码存储
-        if username and (password == 'admin'):
-            session['user'] = username
-            flash(f'欢迎回来，{username}')
-            return redirect(url_for('dashboard'))
-        flash('用户名或密码错误')
-    return render_template('login.html')
-
-@app.route('/logout')
-def logout():
-    session.pop('user', None)
-    flash('已成功登出')
-    return redirect(url_for('login'))
-
-@app.route('/inventory')
-@login_required
-def inventory():
-    conn = get_db()
-    cur = conn.cursor()
-    
-    # 获取所有产品及库存
-    cur.execute('''
-        SELECT p.id, p.name, COALESCE(SUM(i.qty), 0) as total_qty 
-        FROM products p
-        LEFT JOIN inventory i ON p.id = i.product_id
-        GROUP BY p.id
-        ORDER BY p.name
-    ''')
-    products = cur.fetchall()
-    
-    # 获取所有仓库
-    cur.execute('SELECT * FROM warehouses ORDER BY name')
-    warehouses = cur.fetchall()
-    
-    conn.close()
-    return render_template('inventory.html', products=products, warehouses=warehouses)
-
-@app.route('/smart_quote')
-@login_required
-def smart_quote():
-    return render_template('smart_quote.html')
-
-@app.route('/smart_quote/bulk')
-@login_required
-def smart_quote_bulk():
-    return render_template('smart_quote_bulk.html')
-
-@app.route('/orders')
-@login_required
-def orders():
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute('SELECT * FROM orders ORDER BY date DESC')
-    orders = cur.fetchall()
-    conn.close()
-    return render_template('order.html', orders=orders)
-
-@app.route('/order/bulk')
-@login_required
-def order_bulk():
-    return render_template('order_bulk.html')
-
-@app.route('/bid')
-@login_required
-def bid():
-    conn = get_db()
-    cur = conn.cursor()
-    
-    # 获取所有报价记录
-    cur.execute('SELECT * FROM quotes ORDER BY bid_date DESC')
-    quotes = cur.fetchall()
-    
-    conn.close()
-    return render_template('bid.html', quotes=quotes)
-
-@app.route('/formula')
-@login_required
-def formula():
-    return render_template('formula.html')
-
-@app.route('/formula/editor')
-@login_required
-def formula_editor():
-    return render_template('formula_editor.html')
-
-@app.route('/settings')
-@login_required
-def settings():
-    conn = get_db()
-    cur = conn.cursor()
-    
-    # 获取所有设置
-    cur.execute('SELECT * FROM settings')
-    settings_dict = {row['key']: row['value'] for row in cur.fetchall()}
-    
-    conn.close()
-    return render_template('settings.html', settings=settings_dict)
-
-@app.route('/import')
-@login_required
-def import_data():
-    return render_template('import_upload.html')
-
-@app.route('/import/preview/<task_id>')
-@login_required
-def import_preview(task_id):
-    conn = get_db()
-    cur = conn.cursor()
-    
-    # 获取导入任务信息
-    cur.execute('SELECT * FROM import_tasks WHERE id = ?', (task_id,))
-    task = cur.fetchone()
-    
-    if not task:
-        flash('导入任务不存在')
-        return redirect(url_for('import_data'))
-    
-    conn.close()
-    return render_template('import_preview.html', task=task)
-
-@app.route('/bulk')
-@login_required
-def bulk():
-    return render_template('bulk.html')
-
-@app.route('/pivot')
-@login_required
-def pivot():
-    return render_template('pivot.html')
-
 # --- API 路由 ---
 
 @app.route('/api/products', methods=['GET'])
@@ -911,27 +931,87 @@ def api_product(product_id):
     return jsonify(result)
 
 @app.route('/api/upload', methods=['POST'])
+@login_required
 def api_upload():
     if 'file' not in request.files:
-        return jsonify({'error': '未找到文件'}), 400
-        
+        return jsonify({'error': '未选择文件'}), 400
+    
     file = request.files['file']
     if file.filename == '':
         return jsonify({'error': '未选择文件'}), 400
-        
-    if file:
+    
+    try:
+        # 保存临时文件
         filename = secure_filename(file.filename)
         temp_id = str(uuid.uuid4())
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], f"{temp_id}_{filename}")
-        file.save(filepath)
+        temp_path = os.path.join(UPLOAD_FOLDER, f"{temp_id}_{filename}")
+        file.save(temp_path)
+        
+        # 读取文件内容
+        if pd is None:
+            return jsonify({'error': '系统缺少pandas库，无法处理Excel/CSV文件'}), 500
+            
+        if filename.lower().endswith('.csv'):
+            df = pd.read_csv(temp_path, encoding='utf-8')
+        else:
+            df = pd.read_excel(temp_path)
+            
+        # 准备返回数据
+        preview_data = df.head(5).to_dict('records')
+        columns = df.columns.tolist()
+        
+        return jsonify({
+            'temp_id': temp_id,
+            'filename': filename,
+            'columns': columns,
+            'preview_data': preview_data
+        })
+                              
+    except Exception as e:
+        return jsonify({'error': f'处理文件错误: {str(e)}'}), 500
+
+@app.route('/api/import/upload', methods=['POST'])
+@login_required
+def api_import_upload():
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': '未选择文件'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': '未选择文件'}), 400
+        
+        # 检查pandas
+        if pd is None:
+            return jsonify({'error': '系统缺少pandas库，无法处理Excel/CSV文件'}), 500
+        
+        # 保存临时文件
+        filename = secure_filename(file.filename)
+        temp_id = str(uuid.uuid4())
+        temp_path = os.path.join(UPLOAD_FOLDER, f"{temp_id}_{filename}")
+        file.save(temp_path)
+        
+        # 读取文件内容
+        if filename.lower().endswith('.csv'):
+            df = pd.read_csv(temp_path, encoding='utf-8')
+        else:
+            df = pd.read_excel(temp_path)
+            
+        # 准备返回数据
+        preview_data = df.head(5).to_dict('records')
+        columns = df.columns.tolist()
         
         return jsonify({
             'success': True,
             'temp_id': temp_id,
-            'filename': filename
+            'filename': filename,
+            'columns': columns,
+            'preview_data': preview_data
         })
-    
-    return jsonify({'error': '上传失败'}), 500
+                              
+    except Exception as e:
+        logger.exception("API上传错误")
+        return jsonify({'error': f'处理文件错误: {str(e)}'}), 500
 
 @app.route('/api/import/task', methods=['POST'])
 def api_import_task():
@@ -1152,39 +1232,6 @@ def api_import_execute():
         'success': True,
         'task_id': task_id
     })
-
-@app.route('/api/import/status/<task_id>', methods=['GET'])
-@login_required
-def api_import_status(task_id):
-    conn = get_db()
-    cur = conn.cursor()
-    
-    try:
-        cur.execute("SELECT * FROM import_tasks WHERE id=?", (task_id,))
-        task = cur.fetchone()
-        
-        if not task:
-            return jsonify({'error': '找不到导入任务'}), 404
-            
-        # 将行转换为字典
-        task_dict = {
-            'id': task[0],
-            'temp_id': task[1],
-            'filename': task[2],
-            'status': task[5],
-            'total': task[6],
-            'success': task[7],
-            'failed': task[8],
-            'error_msg': task[9],
-            'created_at': task[10],
-            'updated_at': task[11]
-        }
-        
-        return jsonify(task_dict)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        conn.close()
 
 def _process_quote_import(task_id, temp_id, mapping, global_month, conflict_mode, user_id):
     """后台处理导入任务"""
@@ -1438,3 +1485,6 @@ def _process_import_task(task_id, filepath, mapping, conflict_mode):
             pass
     finally:
         conn.close()
+    
+if __name__ == '__main__':
+        app.run(debug=True, host='0.0.0.0', port=5000)
