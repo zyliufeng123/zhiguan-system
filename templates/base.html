@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}智管系统{% endblock %}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/custom.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-success">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="{{ url_for('dashboard') }}">智管</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="mainNav">
+      <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}">仪表板</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('smart_quote') }}">智能报价</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('order') }}">订单</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('inventory') }}">库存</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('pivot') }}">报表</a></li>
+      </ul>
+      <div class="d-flex">
+        <a class="btn btn-outline-light me-2" href="{{ url_for('settings') }}"><i class="fa fa-cog"></i></a>
+        {% if session.get('user') %}
+          <span class="navbar-text text-light me-2">Hi, {{ session.get('user') }}</span>
+          <a class="btn btn-light" href="{{ url_for('logout') }}">登出</a>
+        {% else %}
+          <a class="btn btn-light" href="{{ url_for('login') }}">登录</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</nav>
+
+<div class="container-fluid">
+  <div class="row">
+    <aside class="col-md-2 d-none d-md-block sidebar bg-white border-end">
+      <div class="sidebar-sticky p-2">
+        <ul class="nav flex-column">
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('smart_quote') }}"><i class="fa fa-handshake me-2"></i>智能报价</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('order') }}"><i class="fa fa-file-invoice-dollar me-2"></i>订单</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('inventory') }}"><i class="fa fa-boxes-stacked me-2"></i>库存</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('pivot') }}"><i class="fa fa-chart-pie me-2"></i>报表</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('settings') }}"><i class="fa fa-sliders-h me-2"></i>设置</a></li>
+        </ul>
+      </div>
+    </aside>
+
+    <main class="col-md-10 ms-sm-auto px-4 py-3" id="main-content">
+      {% with messages = get_flashed_messages() %}
+        {% if messages %}
+          <div class="mt-2">
+            {% for m in messages %}
+              <div class="alert alert-info alert-dismissible fade show" role="alert">
+                {{ m }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+
+<footer class="footer mt-auto py-2 bg-light text-center">
+  <div class="container">
+    <small>智管系统 &copy; {{ current_year or 2025 }}</small>
+  </div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

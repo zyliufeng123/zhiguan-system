@@ -1,39 +1,30 @@
-<!DOCTYPE html><html><head><title>透视报表</title>
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
-<script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
-<link href="https://cdn.datatables.net/1.11.5/css/jquery.dataTables.min.css" rel="stylesheet">
-<!-- PivotTable.js CDN -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.23.0/pivot.min.js"></script>
-<link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.23.0/pivot.min.css">
-</head><body><div class="container">
-<h2>透视表 (表格模式)</h2>
-<div id="pivot_ui" style="width:100%;height:400px;"></div>
-<script>
-// @ts-ignore
-let data = {{ data|safe }};  // 从后端JSON
-let derivers = $.pivotUtilities.derivers;
-let aggregatorTemplates = $.pivotUtilities.aggregatorTemplates;
-$("#pivot_ui").pivotUI(data, {
-  rows: ["company"], cols: ["product"], vals: ["price"], aggregatorName: "Sum",
-  renderers: $.extend($.pivotUtilities.renderers, $.pivotUtilities.export_renderers),
-  menuLimit: 300, rendererName: "Table"  // 只表格，无图
-}, false, "table");  // 拖拽界面
-</script>
-<button onclick="exportTable()">导出CSV</button>
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>透视报表 - 智管</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.datatables.net/1.11.5/css/jquery.dataTables.min.css" rel="stylesheet">
+</head>
+<body>
+<div class="container mt-3">
+  <h4>透视报表</h4>
+  <div id="pivot_ui"></div>
 </div>
+
+{% block scripts %}
+<script id="pivot-data" type="application/json">{{ data|tojson|default('[]') }}</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.23.0/pivot.min.js"></script>
 <script>
-function exportTable() {
-  // JS导出逻辑
-  let csv = Papa.unparse(data);  // 需加PapaParse CDN
-  download(csv, 'pivot.csv', 'text/csv');
-}
-function download(content, fileName, contentType) {
-  let a = document.createElement("a");
-  let file = new Blob([content], {type: contentType});
-  a.href = URL.createObjectURL(file);
-  a.download = fileName;
-  a.click();
-}
+  try {
+    const raw = document.getElementById('pivot-data')?.textContent || '[]';
+    let pivotData = [];
+    try { pivotData = JSON.parse(raw); } catch(e) { pivotData = []; }
+    if (!Array.isArray(pivotData)) pivotData = [];
+    $("#pivot_ui").pivotUI(pivotData);
+  } catch (e) { console.warn('pivot init error', e); }
 </script>
-</body></html>
+{% endblock %}
+</body>
+</html>

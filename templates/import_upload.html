@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}批量导入 - 上传{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <h4>报价单批量导入（仅限报价表）</h4>
+  <form id="uploadForm" enctype="multipart/form-data">
+    <div class="mb-3">
+      <label class="form-label">选择文件（Excel 或 CSV）</label>
+      <input type="file" name="file" id="fileInput" class="form-control" accept=".xlsx,.xls,.csv" />
+    </div>
+    <button type="button" id="uploadBtn" class="btn btn-primary">上传并映射</button>
+  </form>
+  <div id="uploadResult" class="mt-3"></div>
+</div>
+
+<script>
+document.getElementById('uploadBtn').onclick = async function(){
+  const f = document.getElementById('fileInput').files[0];
+  if(!f){ alert('请选择文件'); return; }
+  const fd = new FormData();
+  fd.append('file', f);
+  const res = await fetch('/api/import/upload', { method: 'POST', body: fd });
+  const j = await res.json();
+  if(j.error){ alert(j.error); return; }
+  // 跳转到映射页，携带 temp_id
+  location.href = '/import/preview?temp_id=' + encodeURIComponent(j.temp_id);
+}
+</script>
+{% endblock %}
