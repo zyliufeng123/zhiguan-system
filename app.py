@@ -296,38 +296,10 @@ def smart_quote_data():
         return jsonify({"error": str(e)}), 500
 
 # 批量导入（上传 -> 映射 -> 导入）
-@app.route('/smart_quote/bulk', methods=['GET', 'POST'])
+@app.route('/smart_quote/bulk', methods=['GET','POST'])
 @login_required
 def smart_quote_bulk():
     if request.method == 'GET':
-        # 检查是否有temp_id参数，如果有则显示映射界面
-        temp_id = request.args.get('temp_id')
-        if temp_id:
-            # 从文件读取数据并显示映射界面
-            filepath = _locate_temp_file(temp_id)
-            if filepath:
-                try:
-                    if pd is None:
-                        flash('系统缺少pandas库，无法处理Excel/CSV文件')
-                        return render_template('smart_quote_bulk.html')
-                        
-                    if filepath.lower().endswith('.csv'):
-                        df = pd.read_csv(filepath, encoding='utf-8')
-                    else:
-                        df = pd.read_excel(filepath)
-                    
-                    preview_data = df.head(5).to_dict('records')
-                    columns = df.columns.tolist()
-                    filename = os.path.basename(filepath).replace(f"{temp_id}_", "", 1)
-                    
-                    return render_template('smart_quote_bulk.html', 
-                                          temp_id=temp_id,
-                                          temp_file_name=filename,
-                                          columns=columns,
-                                          preview_data=preview_data)
-                except Exception as e:
-                    flash(f'读取文件错误: {str(e)}')
-        
         return render_template('smart_quote_bulk.html')
     
     # POST请求处理 - 处理文件上传
@@ -341,37 +313,54 @@ def smart_quote_bulk():
             flash('未选择文件')
             return redirect(request.url)
         
-        # 检查pandas
-        if pd is None:
-            flash('系统缺少pandas库，无法处理Excel/CSV文件')
-            return redirect(request.url)
-        
-        # 保存临时文件
-        filename = secure_filename(file.filename)
-        temp_id = str(uuid.uuid4())
-        temp_path = os.path.join(UPLOAD_FOLDER, f"{temp_id}_{filename}")
-        file.save(temp_path)
-        
-        # 读取文件内容
-        if filename.lower().endswith('.csv'):
-            df = pd.read_csv(temp_path, encoding='utf-8')
-        else:
-            df = pd.read_excel(temp_path)
+        if file and file.filename.lower().endswith(('.csv', '.xlsx', '.xls')):
+            # 生成临时文件ID
+            temp_id = f"quote_{int(time.time())}_{secrets.token_hex(8)}"
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(UPLOAD_FOLDER, f"{temp_id}_{filename}")
+            file.save(filepath)
             
-        # 准备数据传递给模板
-        preview_data = df.head(5).to_dict('records')
-        columns = df.columns.tolist()
-        
-        # 直接返回带有数据的页面，显示映射界面
-        return render_template('smart_quote_bulk.html', 
-                              temp_id=temp_id,
-                              temp_file_name=filename,
-                              columns=columns,
-                              preview_data=preview_data)
-                              
+            # 读取文件预览数据
+            try:
+                if filename.lower().endswith('.csv'):
+                    df = pd.read_csv(filepath, encoding='utf-8', nrows=5)
+                else:
+                    df = pd.read_excel(filepath, nrows=5)
+                
+                columns = df.columns.tolist()
+                preview_data = df.head().to_dict('records')
+                
+                # 获取已有公司列表
+                conn = get_db()
+                companies = conn.execute('SELECT DISTINCT company FROM quotes WHERE company IS NOT NULL AND company != ""').fetchall()
+                company_list = [row['company'] for row in companies]
+                conn.close()
+                
+                # 生成年份选项（当前年份前后5年）
+                current_year = datetime.now().year
+                years = list(range(current_year - 5, current_year + 6))
+                months = list(range(1, 13))
+                
+                return render_template('smart_quote_bulk.html', 
+                                     show_mapping=True,
+                                     temp_id=temp_id,
+                                     columns=columns,
+                                     preview_data=preview_data,
+                                     companies=company_list,
+                                     years=years,
+                                     months=months,
+                                     current_year=current_year,
+                                     current_month=datetime.now().month)
+                
+            except Exception as e:
+                flash(f'文件读取失败: {str(e)}')
+                return redirect(request.url)
+        else:
+            flash('仅支持 CSV、Excel 文件')
+            return redirect(request.url)
+            
     except Exception as e:
-        logger.exception("文件上传处理错误")
-        flash(f'处理文件错误: {str(e)}')
+        flash(f'上传失败: {str(e)}')
         return redirect(request.url)
     
 @app.route('/api/companies')
@@ -429,92 +418,44 @@ def api_smart_quote_delete():
 def smart_quote_bulk_import():
     """处理智能报价批量导入的映射配置"""
     try:
+        # 获取表单数据
         temp_id = request.form.get('temp_id')
         product_col = request.form.get('product_col')
-        price_col = request.form.get('price_col')
-        company_col = request.form.get('company_col')
-        date_col = request.form.get('date_col')
-        qty_col = request.form.get('qty_col')
-        conflict_mode = request.form.get('conflict_mode', 'skip')
+        price_col = request.form.get('price_col')  # 现在是中标价格
+        qty_col = request.form.get('qty_col')     # 现在是预计用量
         
-        if not temp_id or not product_col or not price_col or not company_col:
-            flash('请完整填写必填字段')
+        # 获取手动输入的数据
+        company_name = request.form.get('company_name')
+        bid_year = request.form.get('bid_year')
+        bid_month = request.form.get('bid_month')
+        conflict_mode = request.form.get('conflict_mode', 'skip')
+
+        # 参数验证
+        if not all([temp_id, product_col, price_col, company_name, bid_year, bid_month]):
+            flash('请完整填写必填字段（产品列、中标价格列、公司名称、中标年月）')
             return redirect(url_for('smart_quote_bulk'))
         
         # 查找临时文件
         filepath = _locate_temp_file(temp_id)
         if not filepath:
-            flash('临时文件不存在或已过期')
+            flash('临时文件不存在或已过期，请重新上传')
             return redirect(url_for('smart_quote_bulk'))
         
-        # 读取文件并执行导入
-        if pd is None:
-            flash('系统缺少pandas库，无法处理文件')
-            return redirect(url_for('smart_quote_bulk'))
+        # 格式化中标日期 - 修复字符串格式化问题
+        bid_date = f"{bid_year}-{int(bid_month):02d}-01"  # 统一使用月份第一天
         
-        if filepath.lower().endswith('.csv'):
-            df = pd.read_csv(filepath, encoding='utf-8')
+        # 处理导入
+        result = process_smart_quote_import_new(
+            filepath, product_col, price_col, qty_col,
+            company_name, bid_date, conflict_mode
+        )
+        
+        # 导入结果反馈
+        if result['success']:
+            flash(f'导入完成！成功: {result["success_count"]} 条，跳过: {result["skip_count"]} 条，失败: {result["error_count"]} 条')
         else:
-            df = pd.read_excel(filepath)
-        
-        # 执行导入逻辑
-        conn = get_db()
-        cur = conn.cursor()
-        
-        success_count = 0
-        error_count = 0
-        
-        for idx, row in df.iterrows():
-            try:
-                product_name = str(row.get(product_col, '')).strip()
-                company_name = str(row.get(company_col, '')).strip()
-                price_value = _parse_number(row.get(price_col))
-                
-                if not product_name or not company_name or price_value is None:
-                    error_count += 1
-                    continue
-                
-                # 获取其他字段
-                bid_date = str(row.get(date_col, '')).strip() if date_col else datetime.now().strftime('%Y-%m-%d')
-                qty = _parse_number(row.get(qty_col)) if qty_col else 1
-                
-                # 检查是否已存在
-                if conflict_mode == 'skip':
-                    existing = cur.execute(
-                        'SELECT id FROM quotes WHERE product=? AND company=? AND bid_date=?',
-                        (product_name, company_name, bid_date)
-                    ).fetchone()
-                    if existing:
-                        continue
-                
-                # 插入或更新记录
-                if conflict_mode == 'overwrite':
-                    cur.execute('''
-                        INSERT OR REPLACE INTO quotes (product, company, price, qty, bid_date, remarks)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    ''', (product_name, company_name, price_value, qty or 1, bid_date, f'批量导入_{temp_id[:8]}'))
-                else:
-                    cur.execute('''
-                        INSERT INTO quotes (product, company, price, qty, bid_date, remarks)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    ''', (product_name, company_name, price_value, qty or 1, bid_date, f'批量导入_{temp_id[:8]}'))
-                
-                success_count += 1
-                
-            except Exception as e:
-                error_count += 1
-                logger.exception(f"导入第{idx+1}行时出错: {str(e)}")
-        
-        conn.commit()
-        conn.close()
-        
-        # 清理临时文件
-        try:
-            os.remove(filepath)
-        except:
-            pass
-        
-        flash(f'导入完成！成功: {success_count} 条，失败: {error_count} 条')
+            flash(f'导入失败: {result["error"]}')
+            
         return redirect(url_for('smart_quote'))
         
     except Exception as e:
@@ -1485,6 +1426,87 @@ def _process_import_task(task_id, filepath, mapping, conflict_mode):
             pass
     finally:
         conn.close()
+
+def process_smart_quote_import_new(filepath, product_col, price_col, qty_col, 
+                                  company_name, bid_date, conflict_mode):
+    """新的导入处理逻辑 - 统一公司和日期"""
+    try:
+        # 读取文件
+        if filepath.lower().endswith('.csv'):
+            df = pd.read_csv(filepath, encoding='utf-8')
+        else:
+            df = pd.read_excel(filepath)
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        success_count = 0
+        skip_count = 0
+        error_count = 0
+        errors = []
+        
+        for idx, row in df.iterrows():
+            try:
+                # 从Excel读取的数据
+                product_name = str(row.get(product_col, '')).strip()
+                price_value = _parse_number(row.get(price_col))
+                qty_value = int(_parse_number(row.get(qty_col)) or 1) if qty_col else 1
+                
+                # 必填字段验证
+                if not product_name or price_value is None:
+                    error_count += 1
+                    errors.append(f'第{idx+2}行: 产品名称或中标价格为空')
+                    continue
+                
+                # 价格合理性验证
+                if price_value <= 0:
+                    error_count += 1
+                    errors.append(f'第{idx+2}行: 中标价格必须大于0')
+                    continue
+                
+                # 冲突检查
+                if conflict_mode == 'skip':
+                    existing = cur.execute(
+                        'SELECT id FROM quotes WHERE product=? AND company=? AND bid_date=?',
+                        (product_name, company_name, bid_date)
+                    ).fetchone()
+                    if existing:
+                        skip_count += 1
+                        continue
+                
+                # 插入数据（使用统一的公司和日期）
+                cur.execute('''
+                    INSERT OR REPLACE INTO quotes (product, company, price, qty, bid_date, remarks)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (product_name, company_name, price_value, qty_value, bid_date, 
+                     f'批量导入_{datetime.now().strftime("%Y%m%d")}'))
+                
+                success_count += 1
+                
+            except Exception as e:
+                error_count += 1
+                errors.append(f'第{idx+2}行: {str(e)}')
+                logger.exception(f"导入第{idx+1}行时出错")
+        
+        conn.commit()
+        conn.close()
+        
+        # 清理临时文件
+        try:
+            os.remove(filepath)
+        except:
+            pass
+        
+        return {
+            'success': True,
+            'success_count': success_count,
+            'skip_count': skip_count,
+            'error_count': error_count,
+            'errors': errors[:10]
+        }
+        
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
     
 if __name__ == '__main__':
         app.run(debug=True, host='0.0.0.0', port=5000)

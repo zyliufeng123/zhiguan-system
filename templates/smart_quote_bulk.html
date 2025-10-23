@@ -1,142 +1,208 @@
 {% extends "base.html" %}
 
-{% block title %}智能报价 - 批量导入{% endblock %}
+{% block title %}智能报价批量导入{% endblock %}
 
 {% block content %}
 <div class="container-fluid">
     <div class="row">
         <div class="col-12">
-            <h2>智能报价 - 批量导入</h2>
-            
-            {% if not temp_id %}
-            <!-- 文件上传界面 -->
             <div class="card">
                 <div class="card-header">
-                    <h5 class="mb-0">选择文件</h5>
+                    <h4 class="card-title">智能报价批量导入</h4>
                 </div>
                 <div class="card-body">
-                    <form method="post" enctype="multipart/form-data">
-                        <div class="mb-3">
-                            <label for="file" class="form-label">选择CSV或Excel文件</label>
-                            <input type="file" class="form-control" id="file" name="file" accept=".csv,.xls,.xlsx" required>
-                            <div class="form-text">支持CSV、XLS、XLSX格式文件</div>
+                    {% if not show_mapping %}
+                    <!-- 文件上传步骤 -->
+                    <div class="step-1">
+                        <h5>步骤 1: 上传数据文件</h5>
+                        <form method="POST" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label class="form-label">选择文件 (支持 CSV, Excel)</label>
+                                <input type="file" name="file" class="form-control" accept=".csv,.xlsx,.xls" required>
+                                <small class="form-text text-muted">文件应包含产品名称、中标价格、预计用量等列</small>
+                            </div>
+                            <button type="submit" class="btn btn-primary">上传并预览</button>
+                            <a href="{{ url_for('smart_quote') }}" class="btn btn-secondary">返回</a>
+                        </form>
+                    </div>
+                    {% else %}
+                    <!-- 列映射和配置步骤 -->
+                    <div class="step-2">
+                        <h5>步骤 2: 配置导入参数</h5>
+                        
+                        <!-- 数据预览 -->
+                        <div class="mb-4">
+                            <h6>数据预览 (前5行)</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered">
+                                    <thead>
+                                        <tr>
+                                            {% for col in columns %}
+                                            <th>{{ col }}</th>
+                                            {% endfor %}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for row in preview_data %}
+                                        <tr>
+                                            {% for col in columns %}
+                                            <td>{{ row.get(col, '') }}</td>
+                                            {% endfor %}
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
-                        <button type="submit" class="btn btn-primary">上传并映射</button>
-                        <a href="{{ url_for('smart_quote') }}" class="btn btn-secondary ms-2">返回</a>
-                    </form>
-                </div>
-            </div>
-            {% else %}
-            <!-- 映射配置界面 -->
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0">文件: {{ temp_file_name }}</h5>
-                    <small class="text-muted">共 {{ preview_data|length }} 行数据预览</small>
-                </div>
-                <div class="card-body">
-                    
-                    <!-- 数据预览 -->
-                    {% if preview_data %}
-                    <h6>数据预览（前5行）:</h6>
-                    <div class="table-responsive mb-4">
-                        <table class="table table-sm table-bordered">
-                            <thead class="table-light">
-                                <tr>
-                                    {% for col in columns %}
-                                    <th>{{ col }}</th>
-                                    {% endfor %}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for row in preview_data %}
-                                <tr>
-                                    {% for col in columns %}
-                                    <td>{{ row[col] if row[col] is not none else '' }}</td>
-                                    {% endfor %}
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
+
+                        <!-- 配置表单 -->
+                        <form method="POST" action="{{ url_for('smart_quote_bulk_import') }}" id="mappingForm">
+                            <input type="hidden" name="temp_id" value="{{ temp_id }}">
+                            
+                            <div class="row">
+                                <!-- 列映射配置 -->
+                                <div class="col-md-6">
+                                    <h6>Excel列映射配置</h6>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">产品名称列 <span class="text-danger">*</span></label>
+                                        <select name="product_col" class="form-select" required>
+                                            <option value="">请选择...</option>
+                                            {% for col in columns %}
+                                            <option value="{{ col }}">{{ col }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">中标价格列 <span class="text-danger">*</span></label>
+                                        <select name="price_col" class="form-select" required>
+                                            <option value="">请选择...</option>
+                                            {% for col in columns %}
+                                            <option value="{{ col }}">{{ col }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">预计用量列</label>
+                                        <select name="qty_col" class="form-select">
+                                            <option value="">请选择（可选）...</option>
+                                            {% for col in columns %}
+                                            <option value="{{ col }}">{{ col }}</option>
+                                            {% endfor %}
+                                        </select>
+                                        <small class="form-text text-muted">不选择时默认为1</small>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-md-6">
+                                    <h6>统一参数配置</h6>
+                                    
+                                    <div class="mb-3">
+                                          <label class="form-label">中标公司 <span class="text-danger">*</span></label>
+                                          <input type="text" 
+                                                 name="company_name" 
+                                                 class="form-control" 
+                                                 list="company-list" 
+                                                 placeholder="输入公司名称或从下拉列表选择" 
+                                                 autocomplete="off"
+                                                 required>
+                                          <datalist id="company-list">
+                                              {% for company in companies %}
+                                              <option value="{{ company }}">{{ company }}</option>
+                                              {% endfor %}
+                                          </datalist>
+                                          <small class="form-text text-muted">可以选择已有公司或输入新公司名称，所有导入记录将使用此公司名称</small>
+                                  </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">中标年月 <span class="text-danger">*</span></label>
+                                        <div class="row">
+                                            <div class="col-6">
+                                                <select name="bid_year" class="form-select" required>
+                                                    <option value="">选择年份</option>
+                                                    {% for year in years %}
+                                                    <option value="{{ year }}" {% if year == current_year %}selected{% endif %}>{{ year }}年</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                            <div class="col-6">
+                                                <select name="bid_month" class="form-select" required>
+                                                    <option value="">选择月份</option>
+                                                    {% for month in months %}
+                                                    <option value="{{ month }}" {% if month == current_month %}selected{% endif %}>{{ month }}月</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <small class="form-text text-muted">所有导入记录将使用此中标月份</small>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">重复数据处理</label>
+                                        <select name="conflict_mode" class="form-select">
+                                            <option value="skip">跳过重复数据</option>
+                                            <option value="replace">覆盖重复数据</option>
+                                        </select>
+                                        <small class="form-text text-muted">基于产品+公司+日期判断重复</small>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="mt-4">
+                                <button type="submit" class="btn btn-success" disabled id="submitBtn">
+                                    请完成必填字段配置
+                                </button>
+                                <a href="{{ url_for('smart_quote_bulk') }}" class="btn btn-secondary">重新上传</a>
+                                <a href="{{ url_for('smart_quote') }}" class="btn btn-outline-secondary">取消</a>
+                            </div>
+                        </form>
                     </div>
                     {% endif %}
-                    
-                    <!-- 列映射配置 -->
-                    <h6>列映射配置:</h6>
-                    <form id="mappingForm" method="post" action="{{ url_for('smart_quote_bulk_import') }}">
-                        <input type="hidden" name="temp_id" value="{{ temp_id }}">
-                        
-                        <div class="row mb-3">
-                            <div class="col-md-4">
-                                <label class="form-label">产品名称列 <span class="text-danger">*</span></label>
-                                <select name="product_col" class="form-select" required>
-                                    <option value="">请选择...</option>
-                                    {% for col in columns %}
-                                    <option value="{{ col }}">{{ col }}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            
-                            <div class="col-md-4">
-                                <label class="form-label">价格列 <span class="text-danger">*</span></label>
-                                <select name="price_col" class="form-select" required>
-                                    <option value="">请选择...</option>
-                                    {% for col in columns %}
-                                    <option value="{{ col }}">{{ col }}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            
-                            <div class="col-md-4">
-                                <label class="form-label">公司列 <span class="text-danger">*</span></label>
-                                <select name="company_col" class="form-select" required>
-                                    <option value="">请选择...</option>
-                                    {% for col in columns %}
-                                    <option value="{{ col }}">{{ col }}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                        </div>
-                        
-                        <div class="row mb-3">
-                            <div class="col-md-4">
-                                <label class="form-label">日期列（可选）</label>
-                                <select name="date_col" class="form-select">
-                                    <option value="">请选择...</option>
-                                    {% for col in columns %}
-                                    <option value="{{ col }}">{{ col }}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            
-                            <div class="col-md-4">
-                                <label class="form-label">数量列（可选）</label>
-                                <select name="qty_col" class="form-select">
-                                    <option value="">请选择...</option>
-                                    {% for col in columns %}
-                                    <option value="{{ col }}">{{ col }}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            
-                            <div class="col-md-4">
-                                <label class="form-label">冲突处理</label>
-                                <select name="conflict_mode" class="form-select">
-                                    <option value="skip">跳过重复</option>
-                                    <option value="overwrite">覆盖现有</option>
-                                </select>
-                            </div>
-                        </div>
-                        
-                        <div class="mt-4">
-                            <button type="submit" class="btn btn-success">开始导入</button>
-                            <a href="{{ url_for('smart_quote_bulk') }}" class="btn btn-secondary ms-2">重新上传</a>
-                            <a href="{{ url_for('smart_quote') }}" class="btn btn-outline-secondary ms-2">返回列表</a>
-                        </div>
-                    </form>
                 </div>
             </div>
-            {% endif %}
         </div>
     </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('mappingForm');
+    if (!form) return;
+    
+    const submitBtn = document.getElementById('submitBtn');
+    
+// 新的验证逻辑 - 支持输入框
+function validateForm() {
+    const productCol = document.querySelector('select[name="product_col"]').value;
+    const priceCol = document.querySelector('select[name="price_col"]').value;
+    const companyName = document.querySelector('input[name="company_name"]').value.trim();
+    const bidYear = document.querySelector('select[name="bid_year"]').value;
+    const bidMonth = document.querySelector('select[name="bid_month"]').value;
+    
+    const isValid = productCol && priceCol && companyName && bidYear && bidMonth;
+    submitBtn.disabled = !isValid;
+    
+    if (!isValid) {
+        submitBtn.textContent = '请完成必填字段配置';
+        submitBtn.className = 'btn btn-secondary';
+    } else {
+        submitBtn.textContent = '开始导入';
+        submitBtn.className = 'btn btn-success';
+    }
+}
+
+// 监听字段变化 - 需要添加input事件监听
+form.addEventListener('change', validateForm);
+form.addEventListener('input', validateForm);  // 新增：监听输入框变化
+validateForm(); // 初始验证
+    
+    // 提交时显示进度
+    form.addEventListener('submit', function() {
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 导入中...';
+        submitBtn.disabled = true;
+    });
+});
+</script>
 {% endblock %}
