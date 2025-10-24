@@ -5,36 +5,6 @@
 <div class="container-fluid">
     <h4 class="mb-3">计算分析 - 智能报价计算器</h4>
     
-    <!-- 公式管理区域 -->
-    <div class="card mb-3">
-        <div class="card-header">
-            <h5>公式管理</h5>
-        </div>
-        <div class="card-body">
-            <div class="row">
-                <div class="col-md-6">
-                    <label class="form-label">保存的公式</label>
-                    <select class="form-control" id="saved_formula">
-                        <option value="">选择已保存的公式</option>
-                    </select>
-                </div>
-                <div class="col-md-6">
-                    <label class="form-label">公式操作</label>
-                    <div class="btn-group">
-                        <button class="btn btn-outline-primary btn-sm" onclick="loadFormula()">加载</button>
-                        <button class="btn btn-outline-success btn-sm" onclick="saveFormula()">保存</button>
-                        <button class="btn btn-outline-info btn-sm" onclick="newFormula()">新建</button>
-                    </div>
-                </div>
-            </div>
-            <div class="mt-3">
-                <label class="form-label">当前公式（支持中文函数）</label>
-                <textarea class="form-control" id="current_formula" rows="3" 
-                          placeholder="输入公式，如：=求和(B1:D1)*0.8 或 =如果(B1>10, 100, 80)"></textarea>
-            </div>
-        </div>
-    </div>
-    
     <!-- 数据设置区域 -->
     <div class="card mb-3">
         <div class="card-header">
@@ -43,11 +13,18 @@
         <div class="card-body">
             <div class="row">
                 <div class="col-md-6">
-                    <label class="form-label">产品列表设置</label>
-                    <textarea class="form-control" id="product_list" rows="4" 
-                              placeholder="请粘贴产品列表，每行一个产品名称"></textarea>
-                    <small class="text-muted">支持从Excel直接复制粘贴</small>
-                </div>
+    <label class="form-label">产品列表设置</label>
+    <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" id="manual_product_setting">
+        <label class="form-check-label" for="manual_product_setting">
+            手动设置产品列表
+        </label>
+    </div>
+    <textarea class="form-control" id="product_list" rows="4" 
+              placeholder="如不勾选上方选项，将自动从第一个价格列获取产品列表"
+              disabled></textarea>
+    <small class="text-muted">支持从Excel直接复制粘贴，或自动从第一个公司列对应的数据中获取</small>
+</div>
                 <div class="col-md-6">
                     <label class="form-label">公司列管理</label>
                     <div id="company_columns_list" class="mb-2">
@@ -98,9 +75,35 @@
 </div>
 
 <script>
+
+// 调试：监听页面可见性变化
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        console.log('页面隐藏，保存状态');
+        saveTableState();
+    } else {
+        console.log('页面显示');
+    }
+});
+
+console.log('计算分析页面脚本加载完成');
+
 // 全局变量
 let companyColumns = [];
 let tableData = [];
+
+// 监听手动设置产品列表的复选框
+document.getElementById('manual_product_setting').addEventListener('change', function() {
+    const productListTextarea = document.getElementById('product_list');
+    if (this.checked) {
+        productListTextarea.disabled = false;
+        productListTextarea.placeholder = "请粘贴产品列表，每行一个产品名称";
+    } else {
+        productListTextarea.disabled = true;
+        productListTextarea.value = '';
+        productListTextarea.placeholder = "如不勾选上方选项，将自动从第一个价格列获取产品列表";
+    }
+});
 
 // 添加公司列
 function addCompanyColumn() {
@@ -143,23 +146,69 @@ function removeCompanyColumn(index) {
     updateCompanyColumnsList();
 }
 
-// 生成计算表格
-function generateTable() {
-    const productList = document.getElementById('product_list').value.trim();
-    if (!productList) {
-        alert('请输入产品列表');
-        return;
-    }
-    
+// 生成计算表格 - 修改后的逻辑
+async function generateTable() {
     if (companyColumns.length === 0) {
         alert('请至少添加一个公司列');
         return;
     }
     
-    const products = productList.split('\n').filter(p => p.trim());
+    const manualSetting = document.getElementById('manual_product_setting').checked;
+    let products = [];
+    
+    if (manualSetting) {
+        // 使用手动设置的产品列表
+        const productList = document.getElementById('product_list').value.trim();
+        if (!productList) {
+            alert('请输入产品列表或取消勾选手动设置');
+            return;
+        }
+        products = productList.split('\n').filter(p => p.trim());
+    } else {
+        // 自动从第一个价格列获取产品列表
+        try {
+            products = await getAutoProducts();
+            if (!products || products.length === 0) {
+                alert('无数据，请检查第一个价格列的设置');
+                return;
+            }
+        } catch (error) {
+            console.error('获取自动产品列表失败:', error);
+            alert('获取产品列表失败，请检查第一个价格列的设置');
+            return;
+        }
+    }
     
     // 调用API获取数据并生成表格
     fetchDataAndGenerateTable(products);
+}
+
+// 自动获取产品列表 - 新增函数
+async function getAutoProducts() {
+    if (companyColumns.length === 0) {
+        throw new Error('没有设置公司列');
+    }
+    
+    // 使用第一个价格列的条件
+    const firstColumn = companyColumns[0];
+    
+    const response = await fetch('/api/calculation/get_auto_products', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            first_column: firstColumn
+        })
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+        return result.products;
+    } else {
+        throw new Error(result.error || '获取产品列表失败');
+    }
 }
 
 // 获取数据并生成表格
@@ -177,44 +226,92 @@ async function fetchDataAndGenerateTable(products) {
 function generateBasicTable(products) {
     const container = document.getElementById('calculation_table');
     
-    let html = '<table class="table table-bordered table-sm" id="main_table">';
+    let html = '<div class="d-flex justify-content-between align-items-center mb-3">';
+    html += '<div><strong>表格操作：</strong></div>';
+    html += '<div class="btn-group">';
+    html += '<button class="btn btn-primary btn-sm" onclick="addCustomColumn()"><i class="fas fa-plus"></i> 新增列</button>';
+    html += '<button class="btn btn-success btn-sm" onclick="recalculateAll()"><i class="fas fa-calculator"></i> 重新计算</button>';
+    html += '<button class="btn btn-info btn-sm" onclick="saveTableState()"><i class="fas fa-save"></i> 保存状态</button>';
+    html += '<button class="btn btn-warning btn-sm" onclick="clearTable()"><i class="fas fa-trash"></i> 清空表格</button>';
+    html += '</div></div>';
+    
+       // 公式编辑区域（默认隐藏）
+    html += '<div class="alert alert-info" id="formula_editor" style="display: none;">';
+    html += '<div class="d-flex justify-content-between align-items-center mb-2">';
+    html += '<strong>选中列：<span id="selected_column_name">无</span></strong>';
+    html += '<button class="btn btn-sm btn-outline-danger" onclick="deleteSelectedColumn()">删除列</button>';
+    html += '</div>';
+    html += '<div class="input-group">';
+    html += '<span class="input-group-text">公式:</span>';
+    html += '<input type="text" class="form-control" id="column_formula" placeholder="如：华润医药(2025年9月)*0.8 或 如果(华润医药>10, 华润医药*0.8, 华润医药*1.2)">';
+    html += '<button class="btn btn-success" onclick="applyColumnFormula()">应用到整列</button>';
+    html += '</div></div>';
+    html += '<table class="table table-bordered table-sm" id="main_table">';
     
     // 表头
-    html += '<thead class="table-light"><tr>';
-    html += '<th>产品名称</th>';
-    companyColumns.forEach(col => {
-        html += `<th>${col.name}</th>`;
+html += '<thead class="table-light"><tr>';
+html += '<th onclick="selectColumn(-1)" style="cursor: pointer;">产品名称</th>';
+companyColumns.forEach((col, index) => {
+    // 公司列的实际索引：产品列(0) + 公司列索引
+    const actualIndex = index + 1;
+    html += `<th onclick="selectColumn(${actualIndex})" style="cursor: pointer;">${col.name}</th>`;
+});
+
+// 添加自定义列表头
+if (window.customColumns) {
+    window.customColumns.forEach((col, index) => {
+        // 自定义列的实际索引：产品列(0) + 所有公司列 + 自定义列索引
+        const actualIndex = 1 + companyColumns.length + index;
+        html += `<th onclick="selectColumn(${actualIndex})" style="cursor: pointer; background-color: #e3f2fd;">${col.name}</th>`;
     });
-    html += '<th>计算列1</th><th>总分</th>';
+}
     html += '</tr></thead>';
     
     // 表格内容
     html += '<tbody>';
-    products.forEach((product, index) => {
+    products.forEach((product, rowIndex) => {
         html += '<tr>';
-        html += `<td>${product}</td>`;
-        companyColumns.forEach(col => {
-            html += '<td class="price-cell" contenteditable="false">获取中...</td>';
+        html += `<td ondblclick="editCell(this, ${rowIndex}, -1)">${product}</td>`;
+        
+        // 公司价格列
+        companyColumns.forEach((col, colIndex) => {
+            html += `<td class="price-cell" ondblclick="editCell(this, ${rowIndex}, ${colIndex})" contenteditable="false">获取中...</td>`;
         });
-        html += `<td class="formula-cell" contenteditable="true" data-row="${index}" 
-             onblur="calculateFormula(this, ${index})" 
-             onkeypress="if(event.key==='Enter'){event.preventDefault();calculateFormula(this, ${index});}"
-             placeholder="输入公式，如：=B${index+1}*1"></td>`;
-        html += `<td class="result-cell" data-row="${index}">0</td>`;
+        
+        // 自定义计算列
+        if (window.customColumns) {
+            window.customColumns.forEach((col, colIndex) => {
+                const actualColIndex = companyColumns.length + colIndex;
+                html += `<td class="custom-cell" ondblclick="editCell(this, ${rowIndex}, ${actualColIndex})" contenteditable="false">0</td>`;
+            });
+        }
+        
         html += '</tr>';
     });
     html += '</tbody></table>';
     
     container.innerHTML = html;
     
-    // 初始化表格数据数组
-    tableData = products.map(() => new Array(companyColumns.length + 3).fill(0));
+    // 初始化全局变量
+    if (!window.customColumns) {
+        window.customColumns = [];
+    }
+    if (!window.selectedColumnIndex) {
+        window.selectedColumnIndex = -1;
+    }
     
     // 为每个产品获取价格数据
     products.forEach((product, rowIndex) => {
         fetchProductPrices(product, rowIndex);
     });
+    
+    // 尝试恢复保存的状态（页面初始化时）
+if (!window.isRestoringState) {
+    loadTableState();
 }
+}
+
+
 
 // 计算公式
 async function calculateFormula(cell, rowIndex) {
@@ -370,11 +467,6 @@ async function fetchProductPrices(product, rowIndex) {
     }
 }
 
-// 占位函数
-function loadFormula() { console.log('加载公式'); }
-function saveFormula() { console.log('保存公式'); }
-function newFormula() { console.log('新建公式'); }
-function recalculate() { console.log('重新计算'); }
 // 导出Excel
 async function exportExcel() {
     try {
@@ -452,5 +544,668 @@ async function exportExcel() {
         alert('导出失败：' + error.message);
     }
 }
+
+function addCustomColumn() {
+    console.log('新增列功能');
+    console.log('当前自定义列状态:', window.customColumns);
+    
+    // 初始化自定义列数组（如果不存在）
+    if (!window.customColumns) {
+        window.customColumns = [];
+    }
+    
+    // 检查是否已达到最大列数限制
+    if (window.customColumns.length >= 10) {
+        alert('最多只能添加10个计算列');
+        return;
+    }
+    
+    const columnName = `计算列${window.customColumns.length + 1}`;
+    
+    // 添加新列到全局变量
+    window.customColumns.push({
+        name: columnName,
+        formula: ''
+    });
+    
+    console.log('新增列后的自定义列:', window.customColumns);
+    
+    // 重新生成表格以显示新列
+    regenerateTableWithCustomColumns();
+}
+
+function recalculateAll() {
+    console.log('重新计算所有列');
+    alert('重新计算功能开发中...');
+}
+
+function saveTableState() {
+    console.log('保存表格状态');
+    try {
+        // 收集当前表格的所有数据
+        const currentTableData = getCurrentTableData();
+        const manualEdits = collectManualEdits();
+        const calculationResults = collectCalculationResults();
+        
+        const tableState = {
+            companyColumns: companyColumns,
+            customColumns: window.customColumns || [],
+            products: currentTableData.map(row => row[0]), // 第一列是产品名
+            tableData: currentTableData,
+            manualEdits: manualEdits,
+            calculationResults: calculationResults,
+            timestamp: new Date().getTime(),
+            version: "1.0"
+        };
+        
+        localStorage.setItem('zhiguan_calculation_state', JSON.stringify(tableState));
+        console.log('状态已保存', tableState);
+    } catch (error) {
+        console.error('保存失败:', error);
+        alert('保存失败');
+    }
+}
+
+// 收集手动编辑的数据
+function collectManualEdits() {
+    const manualEdits = {};
+    const table = document.getElementById('main_table');
+    if (!table) return manualEdits;
+    
+    const rows = table.querySelectorAll('tbody tr');
+    rows.forEach((row, rowIndex) => {
+        const cells = row.querySelectorAll('td');
+        cells.forEach((cell, colIndex) => {
+            // 检查是否为手动编辑的单元格（有特殊背景色或属性）
+            if (cell.style.backgroundColor === 'rgb(255, 243, 205)' || cell.getAttribute('data-manual-edit')) {
+                manualEdits[`${rowIndex}_${colIndex}`] = cell.textContent.trim();
+            }
+        });
+    });
+    
+    return manualEdits;
+}
+
+// 收集计算结果
+function collectCalculationResults() {
+    const calculationResults = {};
+    const table = document.getElementById('main_table');
+    if (!table) return calculationResults;
+    
+    const rows = table.querySelectorAll('tbody tr');
+    rows.forEach((row, rowIndex) => {
+        const cells = row.querySelectorAll('td');
+        cells.forEach((cell, colIndex) => {
+            // 检查是否为公式计算结果
+            if (cell.getAttribute('data-formula-result') === 'true' || 
+                cell.style.backgroundColor === 'rgb(232, 245, 232)') {
+                calculationResults[`${rowIndex}_${colIndex}`] = {
+                    value: cell.textContent.trim(),
+                    isCalculated: true
+                };
+            }
+        });
+    });
+    
+    return calculationResults;
+}
+
+function loadTableState() {
+    console.log('加载表格状态（生成表格时调用）');
+    
+    // 在页面恢复过程中，不要重复加载状态
+    if (window.isRestoringState) {
+        console.log('正在恢复状态中，跳过loadTableState');
+        return;
+    }
+    
+    try {
+        const saved = localStorage.getItem('zhiguan_calculation_state');
+        if (saved) {
+            const tableState = JSON.parse(saved);
+            
+            // 检查是否过期（7天）
+            const now = new Date().getTime();
+            const sevenDays = 7 * 24 * 60 * 60 * 1000;
+            
+            if (now - tableState.timestamp > sevenDays) {
+                localStorage.removeItem('zhiguan_calculation_state');
+                console.log('状态已过期，已清除');
+                return;
+            }
+            
+            // 只在必要时恢复自定义列（避免重复）
+            if (!window.customColumns || window.customColumns.length === 0) {
+                if (tableState.customColumns) {
+                    window.customColumns = [...tableState.customColumns];
+                    console.log('loadTableState 恢复自定义列:', window.customColumns);
+                }
+            }
+            
+            console.log('状态加载成功');
+        }
+    } catch (error) {
+        console.error('加载状态失败:', error);
+    }
+}
+
+function clearTable() {
+    console.log('清空表格');
+    if (confirm('确定要清空所有数据吗？此操作不可恢复。')) {
+        localStorage.removeItem('zhiguan_calculation_state');
+        window.customColumns = [];
+        location.reload();
+    }
+}
+
+function selectColumn(columnIndex) {
+    console.log('选中列:', columnIndex);
+    
+    // 移除之前的选中状态
+    const prevSelected = document.querySelector('th.selected-column');
+    if (prevSelected) {
+        prevSelected.classList.remove('selected-column');
+        prevSelected.style.backgroundColor = '';
+    }
+    
+    // 设置新的选中状态
+    window.selectedColumnIndex = columnIndex;
+    const table = document.getElementById('main_table');
+    if (table && columnIndex >= 0) {
+        // columnIndex 就是实际的列位置，nth-child 需要 +1
+        const th = table.querySelector(`thead tr th:nth-child(${columnIndex + 1})`);
+        if (th) {
+            th.classList.add('selected-column');
+            th.style.backgroundColor = '#b3d9ff';
+        }
+        
+        // 显示公式编辑区域
+        const formulaEditor = document.getElementById('formula_editor');
+        const columnNameSpan = document.getElementById('selected_column_name');
+        
+        if (formulaEditor && columnNameSpan) {
+            formulaEditor.style.display = 'block';
+            
+            // 判断是公司列还是自定义列
+            if (columnIndex <= companyColumns.length) {
+                // 公司价格列（索引1到companyColumns.length）
+                const companyIndex = columnIndex - 1;
+                if (companyIndex >= 0 && companyIndex < companyColumns.length) {
+                    columnNameSpan.textContent = companyColumns[companyIndex].name;
+                    document.getElementById('column_formula').value = ''; 
+                    document.getElementById('column_formula').disabled = true;
+                }
+            } else {
+                // 自定义计算列
+                const customIndex = columnIndex - companyColumns.length - 1;
+                if (window.customColumns && customIndex >= 0 && customIndex < window.customColumns.length) {
+                    columnNameSpan.textContent = window.customColumns[customIndex].name;
+                    document.getElementById('column_formula').value = window.customColumns[customIndex].formula || '';
+                    document.getElementById('column_formula').disabled = false;
+                }
+            }
+        }
+    } else {
+        // 隐藏公式编辑区域
+        const formulaEditor = document.getElementById('formula_editor');
+        if (formulaEditor) {
+            formulaEditor.style.display = 'none';
+        }
+    }
+}
+
+function editCell(cell, rowIndex, colIndex) {
+    console.log('编辑单元格:', rowIndex, colIndex);
+    
+    // 简单的编辑功能
+    const currentValue = cell.textContent.trim();
+    const newValue = prompt('编辑单元格值:', currentValue);
+    
+    if (newValue !== null && newValue !== currentValue) {
+        cell.textContent = newValue;
+        cell.style.backgroundColor = '#fff3cd'; // 标记为手动编辑
+        cell.setAttribute('data-manual-edit', 'true');
+        
+        // 移除公式计算标记（如果有）
+        cell.removeAttribute('data-formula-result');
+        
+        // 保存手动编辑状态
+        if (!window.manualEdits) {
+            window.manualEdits = {};
+        }
+        window.manualEdits[`${rowIndex}_${colIndex}`] = newValue;
+        
+        // 自动保存状态
+        saveTableState();
+    }
+}
+
+function deleteSelectedColumn() {
+    console.log('删除选中列，当前选中索引:', window.selectedColumnIndex);
+    console.log('公司列数:', companyColumns.length);
+    console.log('自定义列数:', window.customColumns ? window.customColumns.length : 0);
+    
+    if (window.selectedColumnIndex <= companyColumns.length) {
+        alert('只能删除自定义计算列');
+        return;
+    }
+    
+    if (!window.customColumns || window.customColumns.length === 0) {
+        alert('没有可删除的自定义列');
+        return;
+    }
+    
+    // 修正计算自定义列索引
+    const customIndex = window.selectedColumnIndex - companyColumns.length - 1;
+    console.log('计算的自定义列索引:', customIndex);
+    
+    if (customIndex >= 0 && customIndex < window.customColumns.length) {
+        const columnName = window.customColumns[customIndex].name;
+        if (confirm(`确定要删除"${columnName}"吗？`)) {
+            // 删除自定义列
+            window.customColumns.splice(customIndex, 1);
+            console.log('删除后的自定义列:', window.customColumns);
+            
+            // 重新生成表格
+            regenerateTableWithCustomColumns();
+            
+            // 隐藏公式编辑区域
+            const formulaEditor = document.getElementById('formula_editor');
+            if (formulaEditor) {
+                formulaEditor.style.display = 'none';
+            }
+            window.selectedColumnIndex = -1;
+        }
+    } else {
+        console.error('无效的自定义列索引:', customIndex);
+        alert('无法删除：选中的列索引无效');
+    }
+}
+
+// 应用列公式到整列
+async function applyColumnFormula() {
+    console.log('应用列公式');
+    
+    const formula = document.getElementById('column_formula').value.trim();
+    const selectedIndex = window.selectedColumnIndex;
+    
+    if (!formula) {
+        alert('请输入公式');
+        return;
+    }
+    
+    if (selectedIndex < 0) {
+        alert('请先选择一个列');
+        return;
+    }
+    
+   // 检查是否为自定义计算列（不能对价格列应用公式）
+if (selectedIndex <= companyColumns.length) {
+    alert('只能对自定义计算列应用公式，价格列数据来自数据库');
+    return;
+}
+
+const customIndex = selectedIndex - companyColumns.length - 1;
+    if (!window.customColumns || !window.customColumns[customIndex]) {
+        alert('无效的计算列');
+        return;
+    }
+    
+    try {
+        // 获取当前表格数据
+        const currentTableData = getCurrentTableData();
+        
+        // 调用API计算整列
+        const response = await fetch('/api/calculation/evaluate_column_formula', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                formula: formula,
+                table_data: currentTableData,
+                column_index: selectedIndex,
+                column_headers: getColumnHeaders()
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+    console.log('API返回结果:', result); // 添加调试信息
+    console.log('计算结果:', result.results); // 添加调试信息
+    console.log('选中列索引:', selectedIndex); // 添加调试信息
+    
+    // 更新表格中的整列数据
+    updateColumnResults(selectedIndex, result.results);
+            
+            // 保存公式到列配置
+            window.customColumns[customIndex].formula = formula;
+            
+            // 保存状态
+            saveTableState();
+            
+            alert(`公式应用成功！计算了 ${result.results.length} 行数据`);
+        } else {
+            alert('公式计算失败：' + result.error);
+        }
+        
+    } catch (error) {
+        console.error('应用列公式失败:', error);
+        alert('应用公式失败：' + error.message);
+    }
+}
+
+// 获取列头信息
+function getColumnHeaders() {
+    const headers = ['产品名称'];
+    
+    // 添加公司列头
+    companyColumns.forEach(col => {
+        headers.push(col.name);
+    });
+    
+    // 添加自定义列头
+    if (window.customColumns) {
+        window.customColumns.forEach(col => {
+            headers.push(col.name);
+        });
+    }
+    
+    return headers;
+}
+
+// 更新列结果
+function updateColumnResults(columnIndex, results) {
+    console.log('开始更新列结果, 列索引:', columnIndex, '结果:', results);
+    
+    const table = document.getElementById('main_table');
+    if (!table) {
+        console.error('找不到表格');
+        return;
+    }
+    
+    const rows = table.querySelectorAll('tbody tr');
+    console.log('表格行数:', rows.length);
+    console.log('公司列数:', companyColumns.length);
+    console.log('自定义列数:', window.customColumns ? window.customColumns.length : 0);
+    
+    // 调试：打印表头信息
+    const headers = getColumnHeaders();
+    console.log('所有列头:', headers);
+    console.log('选中列索引:', columnIndex, '对应列名:', headers[columnIndex]);
+    
+    results.forEach((result, rowIndex) => {
+        if (rowIndex < rows.length) {
+            const row = rows[rowIndex];
+            
+            // 重要修正：columnIndex 就是在表格中的实际列位置
+            // nth-child 从1开始计数，所以需要 +1
+            const nthChildPosition = columnIndex + 1;
+            const cellSelector = `td:nth-child(${nthChildPosition})`;
+            console.log(`第${rowIndex}行，列索引${columnIndex}，nth-child位置${nthChildPosition}，选择器:`, cellSelector);
+            
+            const cell = row.querySelector(cellSelector);
+            
+            if (cell) {
+                console.log(`更新第${rowIndex}行第${columnIndex}列，结果:`, result);
+                
+                if (typeof result === 'number') {
+                    cell.textContent = result.toFixed(2);
+                    cell.style.backgroundColor = '#e8f5e8'; // 浅绿色表示计算结果
+                } else {
+                    cell.textContent = result;
+                    cell.style.backgroundColor = '#ffebee'; // 浅红色表示错误
+                }
+                
+                // 标记为公式计算结果
+                cell.setAttribute('data-formula-result', 'true');
+                
+                // 移除可能存在的 price-cell 类，添加 custom-cell 类
+                cell.className = 'custom-cell';
+            } else {
+                console.error(`找不到第${rowIndex}行第${columnIndex}列的单元格，选择器:`, cellSelector);
+                
+                // 调试：打印该行所有单元格
+                const allCells = row.querySelectorAll('td');
+                console.log(`第${rowIndex}行共有${allCells.length}个单元格:`);
+                allCells.forEach((c, i) => {
+                    console.log(`  第${i+1}列(nth-child(${i+1})): ${c.textContent.trim()}`);
+                });
+            }
+        }
+    });
+}
+
+function regenerateTableWithCustomColumns() {
+    console.log('重新生成表格，保留计算结果');
+    
+    // 在重新生成之前，先保存当前状态
+    saveTableState();
+    
+    // 重新生成表格，包含自定义列
+    const table = document.getElementById('main_table');
+    if (!table) return;
+    
+    // 获取当前产品列表
+    const rows = table.querySelectorAll('tbody tr');
+    const products = [];
+    rows.forEach(row => {
+        const firstCell = row.querySelector('td');
+        if (firstCell) {
+            products.push(firstCell.textContent.trim());
+        }
+    });
+    
+    if (products.length > 0) {
+        generateBasicTable(products);
+        
+        // 重新生成后，恢复保存的数据
+        setTimeout(() => {
+            restoreTableData();
+        }, 100); // 给一点时间让表格完全生成
+    }
+}
+
+// 恢复表格数据
+function restoreTableData() {
+    console.log('恢复表格数据');
+    try {
+        const saved = localStorage.getItem('zhiguan_calculation_state');
+        if (!saved) return;
+        
+        const tableState = JSON.parse(saved);
+        
+        // 恢复手动编辑的数据
+        if (tableState.manualEdits) {
+            restoreManualEdits(tableState.manualEdits);
+        }
+        
+        // 恢复计算结果
+        if (tableState.calculationResults) {
+            restoreCalculationResults(tableState.calculationResults);
+        }
+        
+        console.log('表格数据恢复完成');
+    } catch (error) {
+        console.error('恢复数据失败:', error);
+    }
+}
+
+// 恢复手动编辑数据
+function restoreManualEdits(manualEdits) {
+    const table = document.getElementById('main_table');
+    if (!table) return;
+    
+    const rows = table.querySelectorAll('tbody tr');
+    
+    Object.keys(manualEdits).forEach(key => {
+        const [rowIndex, colIndex] = key.split('_').map(Number);
+        if (rowIndex < rows.length) {
+            const row = rows[rowIndex];
+            const cell = row.querySelector(`td:nth-child(${colIndex + 1})`);
+            if (cell) {
+                cell.textContent = manualEdits[key];
+                cell.style.backgroundColor = '#fff3cd'; // 标记为手动编辑
+                cell.setAttribute('data-manual-edit', 'true');
+            }
+        }
+    });
+}
+
+// 恢复计算结果
+function restoreCalculationResults(calculationResults) {
+    const table = document.getElementById('main_table');
+    if (!table) return;
+    
+    const rows = table.querySelectorAll('tbody tr');
+    
+    Object.keys(calculationResults).forEach(key => {
+        const [rowIndex, colIndex] = key.split('_').map(Number);
+        if (rowIndex < rows.length) {
+            const row = rows[rowIndex];
+            const cell = row.querySelector(`td:nth-child(${colIndex + 1})`);
+            if (cell && calculationResults[key].isCalculated) {
+                cell.textContent = calculationResults[key].value;
+                cell.style.backgroundColor = '#e8f5e8'; // 浅绿色表示计算结果
+                cell.setAttribute('data-formula-result', 'true');
+                cell.className = 'custom-cell';
+            }
+        }
+    });
+}
+
+// ==================== 在这里添加第二步的代码 ====================
+// 页面加载完成后自动恢复状态
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('页面加载完成，尝试恢复状态');
+    restorePageState();
+});
+
+// 恢复页面状态
+function restorePageState() {
+    try {
+        const saved = localStorage.getItem('zhiguan_calculation_state');
+        if (!saved) {
+            console.log('没有保存的状态');
+            return;
+        }
+        
+        const tableState = JSON.parse(saved);
+        
+        // 检查是否过期（7天）
+        const now = new Date().getTime();
+        const sevenDays = 7 * 24 * 60 * 60 * 1000;
+        
+        if (now - tableState.timestamp > sevenDays) {
+            localStorage.removeItem('zhiguan_calculation_state');
+            console.log('状态已过期，已清除');
+            return;
+        }
+        
+        console.log('恢复状态:', tableState);
+        
+        // 恢复公司列设置
+        if (tableState.companyColumns && tableState.companyColumns.length > 0) {
+            companyColumns = tableState.companyColumns;
+            updateCompanyColumnsList();
+            console.log('恢复公司列:', companyColumns);
+        }
+        
+        // 恢复自定义列（清空现有的，避免重复）
+        window.customColumns = [];
+        if (tableState.customColumns && tableState.customColumns.length > 0) {
+            window.customColumns = [...tableState.customColumns]; // 创建副本，避免引用问题
+            console.log('恢复自定义列:', window.customColumns);
+        }
+        
+        // 恢复产品列表和表格
+        if (tableState.products && tableState.products.length > 0) {
+            // 设置恢复状态标志，避免重复加载
+            window.isRestoringState = true;
+            
+            // 重新生成表格
+            generateBasicTable(tableState.products);
+            
+            // 延迟恢复数据，确保表格已生成
+            setTimeout(() => {
+                restoreTableData();
+                window.isRestoringState = false;
+                console.log('完整状态恢复完成');
+                
+                // 显示恢复成功提示
+                showRestoreNotification(tableState);
+            }, 200);
+        }
+        
+    } catch (error) {
+        console.error('恢复页面状态失败:', error);
+    }
+}
+
+// 显示恢复提示
+function showRestoreNotification(tableState) {
+    const productCount = tableState.products ? tableState.products.length : 0;
+    const columnCount = tableState.companyColumns ? tableState.companyColumns.length : 0;
+    const customColumnCount = tableState.customColumns ? tableState.customColumns.length : 0;
+    
+    if (productCount > 0 || columnCount > 0) {
+        const saveTime = new Date(tableState.timestamp).toLocaleString();
+        const message = `已恢复上次保存的状态：\n` +
+                       `- ${productCount} 个产品\n` +
+                       `- ${columnCount} 个公司列\n` +
+                       `- ${customColumnCount} 个计算列\n` +
+                       `保存时间：${saveTime}`;
+        
+        console.log(message);
+        
+        // 可选：显示一个简短的提示
+        setTimeout(() => {
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: #d4edda;
+                color: #155724;
+                border: 1px solid #c3e6cb;
+                border-radius: 5px;
+                padding: 10px 15px;
+                z-index: 1000;
+                font-size: 14px;
+                max-width: 300px;
+            `;
+            notification.innerHTML = `
+                <strong>状态已恢复</strong><br>
+                ${productCount}个产品，${columnCount}个公司列，${customColumnCount}个计算列
+            `;
+            
+            document.body.appendChild(notification);
+            
+            // 3秒后自动消失
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 3000);
+        }, 500);
+    }
+}
+
+// 在页面卸载前保存状态
+window.addEventListener('beforeunload', function() {
+    console.log('页面即将卸载，保存状态');
+    saveTableState();
+});
+
+// 定期自动保存（每30秒）
+setInterval(function() {
+    const table = document.getElementById('main_table');
+    if (table) {
+        console.log('定期自动保存状态');
+        saveTableState();
+    }
+}, 30000); // 30秒
+
 </script>
 {% endblock %}

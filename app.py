@@ -1691,138 +1691,217 @@ def api_evaluate_formula():
         })
 
 def parse_and_calculate_formula(expression, table_data, row_index):
-    """解析并计算公式"""
+    """增强的公式解析和计算"""
+    try:
+        # 处理中文函数转换
+        expression = convert_chinese_functions(expression)
+        
+        # 处理条件函数
+        expression = process_conditional_functions(expression)
+        
+        # 处理Excel式引用（如B1, C1等）
+        expression = process_excel_references(expression, table_data, row_index)
+        
+        # 处理数学函数
+        expression = process_math_functions(expression, table_data, row_index)
+        
+        # 最终计算
+        result = safe_eval(expression)
+        
+        return result
+        
+    except Exception as e:
+        logger.exception(f"公式计算错误: {expression}")
+        return f'#错误#{str(e)}'
+
+def convert_chinese_functions(expression):
+    """转换中文函数为英文函数"""
+    # 中文函数映射
+    chinese_functions = {
+        '如果': 'IF',
+        '求和': 'SUM',
+        '平均': 'AVERAGE',
+        '最大': 'MAX',
+        '最小': 'MIN',
+        '绝对值': 'ABS',
+        '四舍五入': 'ROUND'
+    }
+    
+    for chinese, english in chinese_functions.items():
+        expression = expression.replace(chinese, english)
+    
+    return expression
+
+def process_conditional_functions(expression):
+    """处理条件函数 IF(condition, true_value, false_value)"""
     import re
     
-    # 处理单元格引用 (如 B1, C2)
-    def replace_cell_reference(match):
-        col_letter = match.group(1)
-        row_num = int(match.group(2)) - 1  # 转为0基索引
+    # 查找所有IF函数
+    def replace_if_function(match):
+        full_match = match.group(0)
+        content = match.group(1)
         
-        # 列字母转数字 (A=0, B=1, C=2...)
-        col_index = ord(col_letter.upper()) - ord('A')
-        
-        if 0 <= row_num < len(table_data) and 0 <= col_index < len(table_data[row_num]):
-            value = table_data[row_num][col_index]
-            # 如果是"无数据"或非数字，返回0
-            if value == '无数据' or not isinstance(value, (int, float)):
-                try:
-                    return str(float(value))
-                except:
-                    return '0'
-            return str(value)
-        return '0'
-    
-    # 替换单元格引用 B1, C2 等
-    expression = re.sub(r'([A-Z])(\d+)', replace_cell_reference, expression)
-    
-    # 处理区间引用 B1:C1
-    def replace_range_reference(match):
-        start_col = ord(match.group(1).upper()) - ord('A')
-        start_row = int(match.group(2)) - 1
-        end_col = ord(match.group(3).upper()) - ord('A')
-        end_row = int(match.group(4)) - 1
-        
-        values = []
-        for r in range(start_row, end_row + 1):
-            for c in range(start_col, end_col + 1):
-                if 0 <= r < len(table_data) and 0 <= c < len(table_data[r]):
-                    value = table_data[r][c]
-                    if value != '无数据' and isinstance(value, (int, float)):
-                        values.append(value)
-                    else:
-                        try:
-                            values.append(float(value))
-                        except:
-                            pass
-        return ','.join(map(str, values))
-    
-    # 替换区间引用
-    expression = re.sub(r'([A-Z])(\d+):([A-Z])(\d+)', replace_range_reference, expression)
-    
-    # 实现简单的函数计算
-    def calculate_function(func_name, args_str):
         try:
-            if ',' in args_str:
-                args = [float(x.strip()) for x in args_str.split(',') if x.strip()]
-            else:
-                args = [float(args_str.strip())] if args_str.strip() else []
+            # 简单解析参数（需要考虑嵌套括号）
+            params = parse_function_parameters(content)
             
-            if func_name == 'SUM':
-                return sum(args)
-            elif func_name == 'AVERAGE':
-                return sum(args) / len(args) if args else 0
-            elif func_name == 'MAX':
-                return max(args) if args else 0
-            elif func_name == 'MIN':
-                return min(args) if args else 0
-            elif func_name == 'COUNT':
-                return len(args)
-            else:
-                return 0
-        except:
-            return 0
-    
-    # 处理函数调用
-    func_pattern = r'(SUM|AVERAGE|MAX|MIN|COUNT)\(([^)]*)\)'
-    
-    def replace_function(match):
-        func_name = match.group(1)
-        args_str = match.group(2)
-        result = calculate_function(func_name, args_str)
-        return str(result)
-    
-    expression = re.sub(func_pattern, replace_function, expression)
-    
-    # 处理IF函数
-    if_pattern = r'IF\(([^,]+),([^,]+),([^)]+)\)'
-    def replace_if(match):
-        try:
-            condition = match.group(1).strip()
-            true_value = match.group(2).strip()
-            false_value = match.group(3).strip()
+            if len(params) != 3:
+                return f'#错误#IF函数需要3个参数'
             
-            # 简单的条件判断
-            if '>' in condition:
-                left, right = condition.split('>')
-                if float(left.strip()) > float(right.strip()):
-                    return true_value
-                else:
-                    return false_value
-            elif '<' in condition:
-                left, right = condition.split('<')
-                if float(left.strip()) < float(right.strip()):
-                    return true_value
-                else:
-                    return false_value
-            elif '=' in condition:
-                left, right = condition.split('=')
-                if float(left.strip()) == float(right.strip()):
-                    return true_value
-                else:
-                    return false_value
-            return false_value
-        except:
-            return false_value
+            condition, true_val, false_val = params
+            
+            # 构建Python条件表达式
+            return f'({true_val} if ({condition}) else {false_val})'
+            
+        except Exception as e:
+            return f'#错误#{str(e)}'
     
-    expression = re.sub(if_pattern, replace_if, expression)
+    # 替换IF函数
+    pattern = r'IF\s*\(\s*([^)]+(?:\([^)]*\)[^)]*)*)\s*\)'
+    while re.search(pattern, expression):
+        expression = re.sub(pattern, replace_if_function, expression)
     
-    # 最后计算数学表达式（支持基本运算：+, -, *, /, ()）
-    try:
-        # 清理表达式，确保只包含安全的字符
-        safe_chars = '0123456789+-*/.() '
-        cleaned_expression = ''.join(c for c in expression if c in safe_chars)
-        
-        if cleaned_expression.strip():
-            # 使用eval计算基本数学表达式
-            result = eval(cleaned_expression)
-            return result
-        else:
-            return '#错误#'
-    except Exception as e:
-        print(f"公式计算错误: {expression} -> {e}")  # 调试信息
-        return '#错误#'
+    return expression
 
+def parse_function_parameters(param_string):
+    """解析函数参数，处理嵌套括号和逗号"""
+    params = []
+    current_param = ""
+    paren_level = 0
+    
+    for char in param_string:
+        if char == '(':
+            paren_level += 1
+        elif char == ')':
+            paren_level -= 1
+        elif char == ',' and paren_level == 0:
+            params.append(current_param.strip())
+            current_param = ""
+            continue
+        
+        current_param += char
+    
+    if current_param.strip():
+        params.append(current_param.strip())
+    
+    return params
+
+def process_excel_references(expression, table_data, row_index):
+    """处理Excel式引用 (B1, C1, etc.)"""
+    import re
+    
+    def replace_excel_ref(match):
+        col_letter = match.group(1)
+        row_num = int(match.group(2))
+        
+        # 转换列字母为数字 (A=0, B=1, C=2, ...)
+        col_index = ord(col_letter.upper()) - ord('A')
+        row_idx = row_num - 1  # Excel行从1开始，数组从0开始
+        
+        try:
+            if row_idx < len(table_data) and col_index < len(table_data[row_idx]):
+                value = table_data[row_idx][col_index]
+                if isinstance(value, (int, float)):
+                    return str(value)
+                elif value == '无数据':
+                    return '0'
+                else:
+                    try:
+                        return str(float(value))
+                    except:
+                        return '0'
+            else:
+                return '0'
+        except:
+            return '0'
+    
+    # 匹配Excel式引用 (如 B1, C2, AA10等)
+    pattern = r'([A-Z]+)(\d+)'
+    expression = re.sub(pattern, replace_excel_ref, expression)
+    
+    return expression
+
+def process_math_functions(expression, table_data, row_index):
+    """处理数学函数"""
+    import re
+    
+    # 处理SUM函数
+    def replace_sum_function(match):
+        content = match.group(1)
+        try:
+            # 解析范围 (如 B1:D1)
+            if ':' in content:
+                start_ref, end_ref = content.split(':')
+                # 简单实现：假设是同一行的范围
+                start_col = ord(start_ref[0]) - ord('A')
+                end_col = ord(end_ref[0]) - ord('A')
+                
+                total = 0
+                for col in range(start_col, end_col + 1):
+                    if col < len(table_data[row_index]):
+                        value = table_data[row_index][col]
+                        if isinstance(value, (int, float)):
+                            total += value
+                        elif value != '无数据':
+                            try:
+                                total += float(value)
+                            except:
+                                pass
+                
+                return str(total)
+            else:
+                return '0'
+        except:
+            return '0'
+    
+    # 替换SUM函数
+    expression = re.sub(r'SUM\s*\(\s*([^)]+)\s*\)', replace_sum_function, expression)
+    
+    # 处理其他数学函数...
+    # ABS, ROUND, MAX, MIN等可以类似实现
+    
+    return expression
+
+def safe_eval(expression):
+    """安全的表达式计算"""
+    import re
+    import math
+    
+    # 允许的函数和常量
+    allowed_names = {
+        '__builtins__': {},
+        'abs': abs,
+        'round': round,
+        'max': max,
+        'min': min,
+        'sum': sum,
+        'pow': pow,
+        'sqrt': math.sqrt,
+        'sin': math.sin,
+        'cos': math.cos,
+        'tan': math.tan,
+        'pi': math.pi,
+        'e': math.e
+    }
+    
+    # 检查表达式是否安全
+    if re.search(r'[^0-9+\-*/().< >= !=and or not\s]', expression.replace('if', '').replace('else', '')):
+        # 如果包含不安全字符，进行更严格的检查
+        forbidden_patterns = [
+            r'import\s+', r'exec\s*\(', r'eval\s*\(', r'open\s*\(',
+            r'file\s*\(', r'input\s*\(', r'raw_input\s*\(',
+            r'__.*__', r'\..*\('
+        ]
+        
+        for pattern in forbidden_patterns:
+            if re.search(pattern, expression, re.IGNORECASE):
+                raise ValueError("不安全的表达式")
+    
+    try:
+        result = eval(expression, allowed_names, {})
+        return float(result) if isinstance(result, (int, float)) else result
+    except Exception as e:
+        raise ValueError(f"计算错误: {str(e)}")
 @app.route('/api/calculation/export_excel', methods=['POST'])
 @login_required
 def api_export_excel():
@@ -1921,6 +2000,177 @@ def download_temp_file(filename):
         return send_file(filepath, as_attachment=True, download_name=filename)
     else:
         return "文件不存在", 404
+    
+    # 在现有的 API 路由部分添加这个新的 API
+
+@app.route('/api/calculation/get_auto_products', methods=['POST'])
+@login_required
+def api_get_auto_products():
+    """根据第一个价格列条件自动获取产品列表"""
+    try:
+        data = request.get_json()
+        first_column = data.get('first_column', {})
+        
+        company = first_column.get('company', '')
+        year = first_column.get('year', '')
+        month = first_column.get('month', '')
+        
+        if not all([company, year, month]):
+            return jsonify({'error': '缺少必要参数'}), 400
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 构建日期模式 YYYY-MM%
+        date_pattern = f"{year}-{int(month):02d}%"
+        
+        # 查询该公司+年月条件下有价格数据的所有产品
+        cur.execute('''
+            SELECT DISTINCT product FROM quotes 
+            WHERE company = ? AND bid_date LIKE ?
+            ORDER BY id
+        ''', (company, date_pattern))
+        
+        rows = cur.fetchall()
+        products = [row[0] for row in rows]
+        conn.close()
+        
+        if not products:
+            return jsonify({'error': '无数据，请检查第一个价格列的设置'}), 404
+        
+        # 检查是否有重复产品（理论上不应该，但按需求检查）
+        if len(products) != len(set(products)):
+            return jsonify({'error': '数据中存在重复产品，请检查数据完整性'}), 400
+        
+        return jsonify({
+            'success': True,
+            'products': products
+        })
+        
+    except Exception as e:
+        logger.exception("自动获取产品列表错误")
+        return jsonify({'error': str(e)}), 500
+    
+@app.route('/api/calculation/evaluate_column_formula', methods=['POST'])
+@login_required
+def api_evaluate_column_formula():
+    """计算整列公式"""
+    try:
+        data = request.get_json()
+        formula = data.get('formula', '').strip()
+        table_data = data.get('table_data', [])
+        column_index = data.get('column_index', -1)
+        column_headers = data.get('column_headers', [])
+        
+        if not formula or column_index < 0:
+            return jsonify({'error': '缺少必要参数'}), 400
+        
+        if not formula.startswith('='):
+            formula = '=' + formula
+        
+        # 移除开头的等号
+        expression = formula[1:]
+        
+        # 处理列名引用（优先级最高）
+        expression_with_column_refs = replace_column_references(expression, column_headers)
+        
+        results = []
+        
+        # 为每一行计算公式
+        for row_index in range(len(table_data)):
+            try:
+                # 使用增强的列名替换
+                row_expression = enhance_column_reference_replacement(expression_with_column_refs, table_data, row_index, column_headers)
+                
+                # 计算公式
+                result = parse_and_calculate_formula(row_expression, table_data, row_index)
+                results.append(result)
+                
+            except Exception as e:
+                logger.exception(f"计算第{row_index+1}行公式时出错")
+                results.append(f'#错误#{str(e)}')
+        
+        return jsonify({
+            'success': True,
+            'results': results,
+            'formula': formula
+        })
+        
+    except Exception as e:
+        logger.exception("列公式计算错误")
+        return jsonify({'error': str(e)}), 500
+
+def replace_column_references(expression, column_headers):
+    """替换列名引用为列索引标记"""
+    import re
+    
+    # 按长度倒序排列列名，避免短名称被长名称包含时的替换问题
+    sorted_headers = sorted(column_headers, key=len, reverse=True)
+    
+    for i, header in enumerate(sorted_headers):
+        if header in expression:
+            # 找到该列名在原始列表中的位置
+            actual_index = column_headers.index(header)
+            # 替换为特殊标记，稍后替换为实际值
+            expression = expression.replace(header, f'__COL_{actual_index}__')
+    
+    return expression
+
+def substitute_column_values(expression, table_data, row_index, column_headers):
+    """将列索引标记替换为具体数值"""
+    import re
+    
+    def replace_col_marker(match):
+        col_index = int(match.group(1))
+        
+        if 0 <= row_index < len(table_data) and 0 <= col_index < len(table_data[row_index]):
+            value = table_data[row_index][col_index]
+            
+            # 处理不同类型的值
+            if value == '无数据' or value == '获取中...' or value == '获取失败':
+                return '0'
+            elif isinstance(value, (int, float)):
+                return str(value)
+            else:
+                try:
+                    # 尝试转换为数字
+                    float_val = float(str(value).replace(',', ''))
+                    return str(float_val)
+                except:
+                    return '0'
+        else:
+            return '0'
+    
+    # 替换所有列标记
+    result = re.sub(r'__COL_(\d+)__', replace_col_marker, expression)
+    
+    return result
+
+def enhance_column_reference_replacement(expression, table_data, row_index, column_headers):
+    """增强的列引用替换，支持计算列引用"""
+    import re
+    
+    # 先处理列名引用
+    expression = substitute_column_values(expression, table_data, row_index, column_headers)
+    
+    # 处理可能遗留的列名（如果有计算列相互引用）
+    for i, header in enumerate(column_headers):
+        if header in expression:
+            if 0 <= row_index < len(table_data) and i < len(table_data[row_index]):
+                value = table_data[row_index][i]
+                
+                if value == '无数据' or value == '获取中...' or value == '获取失败':
+                    value = 0
+                elif isinstance(value, str):
+                    try:
+                        value = float(value.replace(',', ''))
+                    except:
+                        value = 0
+                
+                # 使用更精确的替换，避免部分匹配
+                expression = re.sub(r'\b' + re.escape(header) + r'\b', str(value), expression)
+    
+    return expression
 
 if __name__ == '__main__':
         app.run(debug=True, host='0.0.0.0', port=5000)
