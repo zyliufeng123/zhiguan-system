@@ -1,0 +1,456 @@
+{% extends "base.html" %}
+{% block title %}计算分析 - 智管{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h4 class="mb-3">计算分析 - 智能报价计算器</h4>
+    
+    <!-- 公式管理区域 -->
+    <div class="card mb-3">
+        <div class="card-header">
+            <h5>公式管理</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6">
+                    <label class="form-label">保存的公式</label>
+                    <select class="form-control" id="saved_formula">
+                        <option value="">选择已保存的公式</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">公式操作</label>
+                    <div class="btn-group">
+                        <button class="btn btn-outline-primary btn-sm" onclick="loadFormula()">加载</button>
+                        <button class="btn btn-outline-success btn-sm" onclick="saveFormula()">保存</button>
+                        <button class="btn btn-outline-info btn-sm" onclick="newFormula()">新建</button>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-3">
+                <label class="form-label">当前公式（支持中文函数）</label>
+                <textarea class="form-control" id="current_formula" rows="3" 
+                          placeholder="输入公式，如：=求和(B1:D1)*0.8 或 =如果(B1>10, 100, 80)"></textarea>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 数据设置区域 -->
+    <div class="card mb-3">
+        <div class="card-header">
+            <h5>数据设置</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6">
+                    <label class="form-label">产品列表设置</label>
+                    <textarea class="form-control" id="product_list" rows="4" 
+                              placeholder="请粘贴产品列表，每行一个产品名称"></textarea>
+                    <small class="text-muted">支持从Excel直接复制粘贴</small>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">公司列管理</label>
+                    <div id="company_columns_list" class="mb-2">
+                        <!-- 动态生成的公司列列表 -->
+                    </div>
+                    <div class="input-group">
+                        <select class="form-control" id="new_company">
+                            <option value="">选择公司</option>
+                            {% for company in companies %}
+                            <option value="{{ company.company }}">{{ company.company }}</option>
+                            {% endfor %}
+                        </select>
+                        <select class="form-control" id="new_year">
+                            {% for year in range(2020, 2030) %}
+                            <option value="{{ year }}" {% if year == 2025 %}selected{% endif %}>{{ year }}年</option>
+                            {% endfor %}
+                        </select>
+                        <select class="form-control" id="new_month">
+                            {% for month in range(1, 13) %}
+                            <option value="{{ month }}" {% if month == 10 %}selected{% endif %}>{{ month }}月</option>
+                            {% endfor %}
+                        </select>
+                        <button class="btn btn-primary" onclick="addCompanyColumn()">添加列</button>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-3 text-center">
+                <button class="btn btn-success" onclick="generateTable()">生成计算表格</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Excel式计算表格区域 -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between">
+            <h5>计算表格</h5>
+            <div class="btn-group">
+                <button class="btn btn-outline-secondary btn-sm" onclick="recalculate()">重新计算</button>
+                <button class="btn btn-outline-success btn-sm" onclick="exportExcel()">导出Excel</button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div id="calculation_table" class="table-responsive">
+                <p class="text-muted text-center">请先设置产品列表和公司列，然后点击"生成计算表格"</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 全局变量
+let companyColumns = [];
+let tableData = [];
+
+// 添加公司列
+function addCompanyColumn() {
+    const company = document.getElementById('new_company').value;
+    const year = document.getElementById('new_year').value;
+    const month = document.getElementById('new_month').value;
+    
+    if (!company) {
+        alert('请选择公司');
+        return;
+    }
+    
+    const columnName = `${company}(${year}年${month}月)`;
+    companyColumns.push({
+        name: columnName,
+        company: company,
+        year: year,
+        month: month
+    });
+    
+    updateCompanyColumnsList();
+}
+
+// 更新公司列列表显示
+function updateCompanyColumnsList() {
+    const container = document.getElementById('company_columns_list');
+    container.innerHTML = '';
+    
+    companyColumns.forEach((col, index) => {
+        const item = document.createElement('div');
+        item.className = 'badge bg-secondary me-2 mb-1';
+        item.innerHTML = `${col.name} <span onclick="removeCompanyColumn(${index})" style="cursor:pointer;">×</span>`;
+        container.appendChild(item);
+    });
+}
+
+// 删除公司列
+function removeCompanyColumn(index) {
+    companyColumns.splice(index, 1);
+    updateCompanyColumnsList();
+}
+
+// 生成计算表格
+function generateTable() {
+    const productList = document.getElementById('product_list').value.trim();
+    if (!productList) {
+        alert('请输入产品列表');
+        return;
+    }
+    
+    if (companyColumns.length === 0) {
+        alert('请至少添加一个公司列');
+        return;
+    }
+    
+    const products = productList.split('\n').filter(p => p.trim());
+    
+    // 调用API获取数据并生成表格
+    fetchDataAndGenerateTable(products);
+}
+
+// 获取数据并生成表格
+async function fetchDataAndGenerateTable(products) {
+    try {
+        // 这里先生成基础表格结构，下一步我们会添加数据获取API
+        generateBasicTable(products);
+    } catch (error) {
+        console.error('生成表格失败:', error);
+        alert('生成表格失败');
+    }
+}
+
+// 生成基础表格
+function generateBasicTable(products) {
+    const container = document.getElementById('calculation_table');
+    
+    let html = '<table class="table table-bordered table-sm" id="main_table">';
+    
+    // 表头
+    html += '<thead class="table-light"><tr>';
+    html += '<th>产品名称</th>';
+    companyColumns.forEach(col => {
+        html += `<th>${col.name}</th>`;
+    });
+    html += '<th>计算列1</th><th>总分</th>';
+    html += '</tr></thead>';
+    
+    // 表格内容
+    html += '<tbody>';
+    products.forEach((product, index) => {
+        html += '<tr>';
+        html += `<td>${product}</td>`;
+        companyColumns.forEach(col => {
+            html += '<td class="price-cell" contenteditable="false">获取中...</td>';
+        });
+        html += `<td class="formula-cell" contenteditable="true" data-row="${index}" 
+             onblur="calculateFormula(this, ${index})" 
+             onkeypress="if(event.key==='Enter'){event.preventDefault();calculateFormula(this, ${index});}"
+             placeholder="输入公式，如：=B${index+1}*1"></td>`;
+        html += `<td class="result-cell" data-row="${index}">0</td>`;
+        html += '</tr>';
+    });
+    html += '</tbody></table>';
+    
+    container.innerHTML = html;
+    
+    // 初始化表格数据数组
+    tableData = products.map(() => new Array(companyColumns.length + 3).fill(0));
+    
+    // 为每个产品获取价格数据
+    products.forEach((product, rowIndex) => {
+        fetchProductPrices(product, rowIndex);
+    });
+}
+
+// 计算公式
+async function calculateFormula(cell, rowIndex) {
+    const formula = cell.textContent.trim();
+    console.log('开始计算公式:', formula, '行索引:', rowIndex); // 添加调试
+    
+    if (!formula) {
+        updateResultCell(rowIndex, 0);
+        return;
+    }
+    
+    try {
+        // 获取当前表格数据
+        const currentTableData = getCurrentTableData();
+        console.log('当前表格数据:', currentTableData); // 添加调试
+        
+        const response = await fetch('/api/calculation/evaluate_formula', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                formula: formula,
+                table_data: currentTableData,
+                row_index: rowIndex
+            })
+        });
+        
+        const result = await response.json();
+        console.log('API响应结果:', result); // 添加调试
+        
+        if (result.success) {
+            console.log('计算成功，结果:', result.result); // 添加调试
+            updateResultCell(rowIndex, result.result);
+            cell.style.backgroundColor = '#f8f9fa';
+        } else {
+            console.log('计算失败，错误:', result.error); // 添加调试
+            updateResultCell(rowIndex, result.result || '#错误#');
+            cell.style.backgroundColor = '#ffebee';
+        }
+    } catch (error) {
+        console.error('公式计算失败:', error);
+        updateResultCell(rowIndex, '#错误#');
+        cell.style.backgroundColor = '#ffebee';
+    }
+}
+
+// 获取当前表格数据
+function getCurrentTableData() {
+    const table = document.getElementById('main_table');
+    const rows = table.querySelectorAll('tbody tr');
+    const data = [];
+    
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        const rowData = [];
+        
+        cells.forEach((cell, index) => {
+            if (index === 0) {
+                // 产品名称
+                rowData.push(cell.textContent.trim());
+            } else if (cell.classList.contains('price-cell')) {
+                // 价格数据
+                const value = cell.getAttribute('data-value') || cell.textContent.trim();
+                if (value === '无数据' || value === '获取中...' || value === '获取失败') {
+                    rowData.push('无数据');
+                } else {
+                    rowData.push(parseFloat(value) || 0);
+                }
+            } else {
+                // 其他数据
+                const value = cell.textContent.trim();
+                rowData.push(parseFloat(value) || value);
+            }
+        });
+        
+        data.push(rowData);
+    });
+    
+    return data;
+}
+
+// 更新结果单元格
+function updateResultCell(rowIndex, result) {
+    const table = document.getElementById('main_table');
+    const row = table.querySelector(`tbody tr:nth-child(${rowIndex + 1})`);
+    if (row) {
+        const resultCell = row.querySelector('.result-cell');
+        if (resultCell) {
+            if (typeof result === 'number') {
+                resultCell.textContent = result.toFixed(2);
+            } else {
+                resultCell.textContent = result;
+            }
+        }
+    }
+}
+
+// 获取产品价格数据
+async function fetchProductPrices(product, rowIndex) {
+    try {
+        const response = await fetch('/api/calculation/get_prices', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                products: [product],
+                company_columns: companyColumns
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.data[product]) {
+            const productData = result.data[product];
+            
+            // 更新表格中的价格单元格
+            const row = document.querySelector(`tbody tr:nth-child(${rowIndex + 1})`);
+            if (row) {
+                companyColumns.forEach((col, colIndex) => {
+                    const cell = row.querySelector(`td:nth-child(${colIndex + 2})`); // +2 因为第一列是产品名
+                    if (cell) {
+                        const value = productData[col.name];
+                        if (value === '无数据') {
+                            cell.textContent = '无数据';
+                            cell.className = 'price-cell text-muted';
+                        } else if (typeof value === 'number') {
+                            cell.textContent = value.toFixed(2);
+                            cell.className = 'price-cell';
+                            cell.setAttribute('data-value', value);
+                        } else {
+                            cell.textContent = value;
+                            cell.className = 'price-cell text-warning';
+                        }
+                    }
+                });
+            }
+        }
+    } catch (error) {
+        console.error('获取价格数据失败:', error);
+        // 显示错误信息
+        const row = document.querySelector(`tbody tr:nth-child(${rowIndex + 1})`);
+        if (row) {
+            companyColumns.forEach((col, colIndex) => {
+                const cell = row.querySelector(`td:nth-child(${colIndex + 2})`);
+                if (cell) {
+                    cell.textContent = '获取失败';
+                    cell.className = 'price-cell text-danger';
+                }
+            });
+        }
+    }
+}
+
+// 占位函数
+function loadFormula() { console.log('加载公式'); }
+function saveFormula() { console.log('保存公式'); }
+function newFormula() { console.log('新建公式'); }
+function recalculate() { console.log('重新计算'); }
+// 导出Excel
+async function exportExcel() {
+    try {
+        // 获取当前表格数据
+        const table = document.getElementById('main_table');
+        if (!table) {
+            alert('没有表格数据可以导出');
+            return;
+        }
+        
+        // 获取表头
+        const headers = [];
+        const headerCells = table.querySelectorAll('thead tr th');
+        headerCells.forEach(cell => {
+            headers.push(cell.textContent.trim());
+        });
+        
+        // 获取表格数据
+        const tableData = [];
+        const rows = table.querySelectorAll('tbody tr');
+        
+        rows.forEach(row => {
+            const rowData = [];
+            const cells = row.querySelectorAll('td');
+            
+            cells.forEach(cell => {
+                let value = cell.textContent.trim();
+                
+                // 尝试转换为数字
+                if (value !== '无数据' && value !== '获取中...' && value !== '获取失败') {
+                    const numValue = parseFloat(value);
+                    if (!isNaN(numValue)) {
+                        value = numValue;
+                    }
+                }
+                
+                rowData.push(value);
+            });
+            
+            tableData.push(rowData);
+        });
+        
+        console.log('准备导出数据:', { headers, tableData });
+        
+        // 发送导出请求
+        const response = await fetch('/api/calculation/export_excel', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                headers: headers,
+                table_data: tableData
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // 创建下载链接并自动下载
+            const downloadLink = document.createElement('a');
+            downloadLink.href = result.download_url;
+            downloadLink.download = result.filename;
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            document.body.removeChild(downloadLink);
+            
+            alert('导出成功！文件已开始下载。');
+        } else {
+            alert('导出失败：' + result.error);
+        }
+        
+    } catch (error) {
+        console.error('导出Excel失败:', error);
+        alert('导出失败：' + error.message);
+    }
+}
+</script>
+{% endblock %}

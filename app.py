@@ -490,29 +490,15 @@ def formula():
         conn.close()
     return render_template('formula.html')
 
-@app.route('/formula/editor', methods=['GET', 'POST'])
+@app.route('/calculation_analysis')
 @login_required
-def formula_editor():
-    """
-    公式编辑（原位页已移除）。GET 显示编辑器，POST 用于保存/测试表达式（简单回显/测试）。
-    """
-    result = None
-    error = None
-    expr = ''
-    if request.method == 'POST':
-        expr = request.form.get('formula','').strip()
-        # 测试计算（如果安装了 asteval 则使用，否则仅回显）
-        if expr:
-            try:
-                if _AEVAL_AVAILABLE:
-                    aeval = Interpreter()
-                    val = aeval(expr)
-                    result = val
-                else:
-                    result = '（未安装 asteval，仅回显）' + expr
-            except Exception as e:
-                error = str(e)
-    return render_template('formula.html', formula=expr, result=result, error=error)
+def calculation_analysis():
+    # 获取所有公司名称（用于下拉选择）
+    conn = get_db()
+    companies = conn.execute('SELECT DISTINCT company FROM quotes WHERE company IS NOT NULL AND company != ""').fetchall()
+    conn.close()
+    
+    return render_template('calculation_analysis.html', companies=companies)
 
 # ========== 订单模块（含 JSON API） ==========
 @app.route('/order')
@@ -1507,6 +1493,434 @@ def process_smart_quote_import_new(filepath, product_col, price_col, qty_col,
         
     except Exception as e:
         return {'success': False, 'error': str(e)}
+
+@app.route('/api/fields/add', methods=['POST'])
+@login_required
+def add_field():
+    try:
+        data = request.get_json()
+        table = data.get('table')
+        name = data.get('name')
+        field_type = data.get('type')
+        
+        if not all([table, name, field_type]):
+            return jsonify({'error': '参数不完整'}), 400
+            
+        # 验证表名安全性
+        if table not in ['quotes', 'orders']:
+            return jsonify({'error': '不支持的表名'}), 400
+            
+        # 放宽字段名验证，支持中文
+        if not name.strip() or len(name.strip()) == 0:
+            return jsonify({'error': '字段名不能为空'}), 400
+            
+        # 简单过滤危险字符
+        dangerous_chars = [';', '--', '/*', '*/', 'DROP', 'DELETE', 'UPDATE']
+        name_upper = name.upper()
+        for dangerous in dangerous_chars:
+            if dangerous in name_upper:
+                return jsonify({'error': f'字段名不能包含危险字符: {dangerous}'}), 400
+        
+        # 转换字段类型
+        sql_type_map = {
+            'text': 'TEXT',
+            'int': 'INTEGER', 
+            'float': 'REAL'
+        }
+        sql_type = sql_type_map.get(field_type, 'TEXT')
+        
+        # 执行 ALTER TABLE 添加字段（使用反引号包围字段名）
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(f'ALTER TABLE {table} ADD COLUMN `{name}` {sql_type}')
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': f'字段 {name} 添加成功'})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/calculation/get_prices', methods=['POST'])
+@login_required
+def api_get_prices():
+    """获取产品价格数据用于计算表格"""
+    try:
+        data = request.get_json()
+        products = data.get('products', [])
+        company_columns = data.get('company_columns', [])
+        
+        if not products or not company_columns:
+            return jsonify({'error': '缺少必要参数'}), 400
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 构建结果数据
+        result_data = {}
+        
+        for product in products:
+            result_data[product] = {}
+            
+            for col_info in company_columns:
+                company = col_info.get('company', '')
+                year = col_info.get('year', '')
+                month = col_info.get('month', '')
+                col_name = col_info.get('name', '')
+                
+                if not all([company, year, month]):
+                    result_data[product][col_name] = '参数错误'
+                    continue
+                
+                # 构建日期模式 YYYY-MM%
+                date_pattern = f"{year}-{int(month):02d}%"
+                
+                # 查询数据库
+                cur.execute('''
+                    SELECT price FROM quotes 
+                    WHERE product = ? AND company = ? AND bid_date LIKE ?
+                    ORDER BY bid_date DESC LIMIT 1
+                ''', (product, company, date_pattern))
+                
+                row = cur.fetchone()
+                
+                if row:
+                    result_data[product][col_name] = float(row[0])
+                else:
+                    result_data[product][col_name] = '无数据'
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'data': result_data
+        })
+        
+    except Exception as e:
+        logger.exception("获取价格数据错误")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/calculation/save_result', methods=['POST'])
+@login_required
+def api_save_calculation_result():
+    """保存计算结果"""
+    try:
+        data = request.get_json()
+        table_data = data.get('table_data', [])
+        formula_info = data.get('formula_info', {})
+        
+        if not table_data:
+            return jsonify({'error': '没有数据需要保存'}), 400
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 保存到一个新的计算结果表（如果需要的话）
+        # 这里先简单记录到 settings 表中
+        now = datetime.now().isoformat()
+        result_data = {
+            'table_data': table_data,
+            'formula_info': formula_info,
+            'created_at': now
+        }
+        
+        cur.execute(
+            'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+            (f'calculation_result_{now}', json.dumps(result_data))
+        )
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': '计算结果保存成功'
+        })
+        
+    except Exception as e:
+        logger.exception("保存计算结果错误")
+        return jsonify({'error': str(e)}), 500
     
+@app.route('/api/calculation/evaluate_formula', methods=['POST'])
+@login_required
+def api_evaluate_formula():
+    """计算中文公式"""
+    try:
+        data = request.get_json()
+        formula = data.get('formula', '').strip()
+        table_data = data.get('table_data', [])
+        row_index = data.get('row_index', 0)
+        
+        if not formula:
+            return jsonify({'success': True, 'result': ''})
+        
+        if not formula.startswith('='):
+            return jsonify({'success': True, 'result': formula})
+        
+        # 移除开头的等号
+        expression = formula[1:]
+        
+        # 中文函数替换为英文
+        chinese_functions = {
+            '求和': 'SUM',
+            '平均值': 'AVERAGE',
+            '最大值': 'MAX', 
+            '最小值': 'MIN',
+            '如果': 'IF',
+            '计数': 'COUNT'
+        }
+        
+        for chinese, english in chinese_functions.items():
+            expression = expression.replace(chinese, english)
+        
+        # 解析单元格引用和列名引用
+        result = parse_and_calculate_formula(expression, table_data, row_index)
+        
+        return jsonify({
+            'success': True,
+            'result': result,
+            'original_formula': formula
+        })
+        
+    except Exception as e:
+        logger.exception("公式计算错误")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'result': '#错误#'
+        })
+
+def parse_and_calculate_formula(expression, table_data, row_index):
+    """解析并计算公式"""
+    import re
+    
+    # 处理单元格引用 (如 B1, C2)
+    def replace_cell_reference(match):
+        col_letter = match.group(1)
+        row_num = int(match.group(2)) - 1  # 转为0基索引
+        
+        # 列字母转数字 (A=0, B=1, C=2...)
+        col_index = ord(col_letter.upper()) - ord('A')
+        
+        if 0 <= row_num < len(table_data) and 0 <= col_index < len(table_data[row_num]):
+            value = table_data[row_num][col_index]
+            # 如果是"无数据"或非数字，返回0
+            if value == '无数据' or not isinstance(value, (int, float)):
+                try:
+                    return str(float(value))
+                except:
+                    return '0'
+            return str(value)
+        return '0'
+    
+    # 替换单元格引用 B1, C2 等
+    expression = re.sub(r'([A-Z])(\d+)', replace_cell_reference, expression)
+    
+    # 处理区间引用 B1:C1
+    def replace_range_reference(match):
+        start_col = ord(match.group(1).upper()) - ord('A')
+        start_row = int(match.group(2)) - 1
+        end_col = ord(match.group(3).upper()) - ord('A')
+        end_row = int(match.group(4)) - 1
+        
+        values = []
+        for r in range(start_row, end_row + 1):
+            for c in range(start_col, end_col + 1):
+                if 0 <= r < len(table_data) and 0 <= c < len(table_data[r]):
+                    value = table_data[r][c]
+                    if value != '无数据' and isinstance(value, (int, float)):
+                        values.append(value)
+                    else:
+                        try:
+                            values.append(float(value))
+                        except:
+                            pass
+        return ','.join(map(str, values))
+    
+    # 替换区间引用
+    expression = re.sub(r'([A-Z])(\d+):([A-Z])(\d+)', replace_range_reference, expression)
+    
+    # 实现简单的函数计算
+    def calculate_function(func_name, args_str):
+        try:
+            if ',' in args_str:
+                args = [float(x.strip()) for x in args_str.split(',') if x.strip()]
+            else:
+                args = [float(args_str.strip())] if args_str.strip() else []
+            
+            if func_name == 'SUM':
+                return sum(args)
+            elif func_name == 'AVERAGE':
+                return sum(args) / len(args) if args else 0
+            elif func_name == 'MAX':
+                return max(args) if args else 0
+            elif func_name == 'MIN':
+                return min(args) if args else 0
+            elif func_name == 'COUNT':
+                return len(args)
+            else:
+                return 0
+        except:
+            return 0
+    
+    # 处理函数调用
+    func_pattern = r'(SUM|AVERAGE|MAX|MIN|COUNT)\(([^)]*)\)'
+    
+    def replace_function(match):
+        func_name = match.group(1)
+        args_str = match.group(2)
+        result = calculate_function(func_name, args_str)
+        return str(result)
+    
+    expression = re.sub(func_pattern, replace_function, expression)
+    
+    # 处理IF函数
+    if_pattern = r'IF\(([^,]+),([^,]+),([^)]+)\)'
+    def replace_if(match):
+        try:
+            condition = match.group(1).strip()
+            true_value = match.group(2).strip()
+            false_value = match.group(3).strip()
+            
+            # 简单的条件判断
+            if '>' in condition:
+                left, right = condition.split('>')
+                if float(left.strip()) > float(right.strip()):
+                    return true_value
+                else:
+                    return false_value
+            elif '<' in condition:
+                left, right = condition.split('<')
+                if float(left.strip()) < float(right.strip()):
+                    return true_value
+                else:
+                    return false_value
+            elif '=' in condition:
+                left, right = condition.split('=')
+                if float(left.strip()) == float(right.strip()):
+                    return true_value
+                else:
+                    return false_value
+            return false_value
+        except:
+            return false_value
+    
+    expression = re.sub(if_pattern, replace_if, expression)
+    
+    # 最后计算数学表达式（支持基本运算：+, -, *, /, ()）
+    try:
+        # 清理表达式，确保只包含安全的字符
+        safe_chars = '0123456789+-*/.() '
+        cleaned_expression = ''.join(c for c in expression if c in safe_chars)
+        
+        if cleaned_expression.strip():
+            # 使用eval计算基本数学表达式
+            result = eval(cleaned_expression)
+            return result
+        else:
+            return '#错误#'
+    except Exception as e:
+        print(f"公式计算错误: {expression} -> {e}")  # 调试信息
+        return '#错误#'
+
+@app.route('/api/calculation/export_excel', methods=['POST'])
+@login_required
+def api_export_excel():
+    """导出计算表格为Excel"""
+    try:
+        data = request.get_json()
+        table_data = data.get('table_data', [])
+        headers = data.get('headers', [])
+        
+        if not table_data or not headers:
+            return jsonify({'error': '没有数据需要导出'}), 400
+        
+        # 创建Excel工作簿
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, PatternFill
+        
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "计算分析结果"
+        
+        # 写入表头
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        header_font = Font(color="FFFFFF", bold=True)
+        
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center")
+        
+        # 写入数据
+        for row_idx, row_data in enumerate(table_data, 2):
+            for col_idx, cell_value in enumerate(row_data, 1):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                
+                # 处理不同类型的数据
+                if isinstance(cell_value, (int, float)):
+                    cell.value = cell_value
+                    cell.number_format = '#,##0.00'
+                elif cell_value == '无数据':
+                    cell.value = '无数据'
+                    cell.font = Font(color="999999")
+                else:
+                    cell.value = str(cell_value)
+        
+        # 自动调整列宽
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+        
+        # 保存到临时文件
+        import tempfile
+        import os
+        from datetime import datetime
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"计算分析结果_{timestamp}.xlsx"
+        
+        temp_dir = tempfile.gettempdir()
+        filepath = os.path.join(temp_dir, filename)
+        wb.save(filepath)
+        
+        # 返回文件下载链接
+        return jsonify({
+            'success': True,
+            'download_url': f'/download_temp/{filename}',
+            'filename': filename
+        })
+        
+    except ImportError:
+        return jsonify({'error': '请安装 openpyxl 库：pip install openpyxl'}), 500
+    except Exception as e:
+        logger.exception("导出Excel失败")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/download_temp/<filename>')
+@login_required
+def download_temp_file(filename):
+    """下载临时文件"""
+    import tempfile
+    import os
+    from flask import send_file
+    
+    temp_dir = tempfile.gettempdir()
+    filepath = os.path.join(temp_dir, filename)
+    
+    if os.path.exists(filepath):
+        return send_file(filepath, as_attachment=True, download_name=filename)
+    else:
+        return "文件不存在", 404
+
 if __name__ == '__main__':
         app.run(debug=True, host='0.0.0.0', port=5000)
