@@ -63,33 +63,63 @@
         </div>
     </div>
 
-    <!-- 结果表格区域 -->
+<!-- 在表格前添加加载图标 -->
+<div class="text-center py-3" id="loading-container" style="display: none;">
+    <div class="spinner-border text-primary" role="status" id="loading-icon">
+        <span class="visually-hidden">加载中...</span>
+    </div>
+</div>
+
+       <!-- 结果表格区域 -->
     <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <h5 class="mb-0">报价数据</h5>
-            <div id="search-status" class="text-muted">
-                <i class="fas fa-spinner fa-spin d-none" id="loading-icon"></i>
-                <span id="status-text">就绪</span>
+        <!-- 批量操作工具栏 -->
+        <div class="batch-operations mb-3" id="batchToolbar" style="display: none;">
+            <div class="d-flex align-items-center gap-2 p-2 bg-light border rounded">
+                <span class="text-muted">已选择 <span id="selectedCount">0</span> 项</span>
+                
+                <div class="btn-group" role="group">
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="batchDelete()">
+                        <i class="fas fa-trash"></i> 批量删除
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="showBatchEdit()">
+                        <i class="fas fa-edit"></i> 批量修改
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-success" onclick="batchExport()">
+                        <i class="fas fa-download"></i> 导出选中
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-info" onclick="showBatchCopy()">
+                        <i class="fas fa-copy"></i> 批量复制
+                    </button>
+                </div>
+                
+                <button type="button" class="btn btn-sm btn-outline-secondary ms-auto" onclick="clearSelection()">
+                    取消选择
+                </button>
             </div>
         </div>
+
         <div class="card-body p-0">
+            <!-- 统一的表格 -->
             <div class="table-responsive">
-                <table class="table table-hover mb-0" id="quotes-table">
+                <table class="table table-striped table-hover" id="resultsTable">
                     <thead class="table-light">
                         <tr>
-                            <th style="width:6%">ID</th>
+                            <th width="40">
+                                <input type="checkbox" id="selectAll" onchange="toggleSelectAll()">
+                            </th>
                             <th>产品名称</th>
-                            <th>公司名称</th>
-                            <th style="width:10%">价格</th>
-                            <th style="width:8%">数量</th>
-                            <th style="width:12%">中标日期</th>
-                            <th style="width:12%">操作</th>
+                            <th>中标公司</th>
+                            <th width="120">中标价格</th>
+                            <th width="100">预计用量</th>
+                            <th width="120">中标年月</th>
+                            <th>备注</th>
+                            <th width="150">操作</th>
                         </tr>
                     </thead>
                     <tbody id="quotes-tbody">
                         <tr>
-                            <td colspan="7" class="text-center text-muted py-4">
-                                点击搜索按钮开始查询数据
+                            <td colspan="8" class="text-center text-muted py-4">
+                                <span id="status-text">点击搜索按钮开始查询数据</span>
                             </td>
                         </tr>
                     </tbody>
@@ -100,24 +130,159 @@
         <!-- 分页区域 -->
         <div class="card-footer">
             <div class="d-flex justify-content-between align-items-center">
-                <div id="pagination-info">
-                    共找到 <strong>0</strong> 条记录，第 <strong>0/0</strong> 页
-                </div>
                 <div>
-                    <label class="form-label me-2">每页显示：</label>
-                    <select class="form-select d-inline-block w-auto" id="page-size-select" onchange="changePageSize()">
-                        <option value="20">20条</option>
-                        <option value="50">50条</option>
-                        <option value="100">100条</option>
+                    <span class="text-muted">每页显示</span>
+                    <select class="form-select form-select-sm d-inline-block" style="width: auto;" onchange="changePageSize()">
+                        <option value="10">10</option>
+                        <option value="20" selected>20</option>
+                        <option value="50">50</option>
                     </select>
+                    <span class="text-muted">条记录</span>
+                </div>
+                <div id="pagination-info" class="text-muted">
+                    <!-- 分页信息 -->
                 </div>
                 <nav>
-                    <ul class="pagination mb-0" id="pagination-nav">
-                        <!-- 分页导航将通过JavaScript生成 -->
+                    <ul class="pagination pagination-sm mb-0" id="pagination-nav">
+                        <!-- 分页导航 -->
                     </ul>
                 </nav>
             </div>
         </div>
+    </div>
+
+    <!-- 批量修改模态框 -->
+    <div class="modal fade" id="batchEditModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">批量修改</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="batchEditForm">
+                        <div class="mb-3">
+                            <label class="form-label">修改项目</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="editCompany" name="edit_fields" value="company">
+                                <label class="form-check-label" for="editCompany">中标公司</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="editDate" name="edit_fields" value="date">
+                                <label class="form-check-label" for="editDate">中标年月</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="editPrice" name="edit_fields" value="price">
+                                <label class="form-check-label" for="editPrice">价格调整</label>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3" id="companyField" style="display: none;">
+                            <label class="form-label">新的中标公司</label>
+                            <input type="text" class="form-control" name="new_company" list="company-list">
+                            <datalist id="company-list">
+                                <!-- 动态填充公司列表 -->
+                            </datalist>
+                        </div>
+                        
+                        <div class="mb-3" id="dateField" style="display: none;">
+                            <label class="form-label">新的中标年月</label>
+                            <div class="row">
+                                <div class="col-6">
+                                    <select class="form-select" name="new_year">
+                                        <option value="">选择年份</option>
+                                    </select>
+                                </div>
+                                <div class="col-6">
+                                    <select class="form-select" name="new_month">
+                                        <option value="">选择月份</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3" id="priceField" style="display: none;">
+                            <label class="form-label">价格调整</label>
+                            <div class="input-group">
+                                <select class="form-select" name="price_action" style="flex: 0 0 auto; width: auto;">
+                                    <option value="multiply">乘以</option>
+                                    <option value="add">加上</option>
+                                    <option value="subtract">减去</option>
+                                    <option value="set">设为</option>
+                                </select>
+                                <input type="number" class="form-control" name="price_value" step="0.01" placeholder="数值">
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="executeBatchEdit()">确认修改</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 批量复制模态框 -->
+    <div class="modal fade" id="batchCopyModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">批量复制</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="batchCopyForm">
+                        <p>将选中的 <span id="copyCount">0</span> 条记录复制到：</p>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">目标公司</label>
+                            <input type="text" class="form-control" name="target_company" list="company-list" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">目标年月</label>
+                            <div class="row">
+                                <div class="col-6">
+                                    <select class="form-select" name="target_year" required>
+                                        <option value="">选择年份</option>
+                                    </select>
+                                </div>
+                                <div class="col-6">
+                                    <select class="form-select" name="target_month" required>
+                                        <option value="">选择月份</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="adjustPrice" name="adjust_price">
+                                <label class="form-check-label" for="adjustPrice">同时调整价格</label>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3" id="priceAdjustField" style="display: none;">
+                            <label class="form-label">价格调整</label>
+                            <div class="input-group">
+                                <select class="form-select" name="copy_price_action" style="flex: 0 0 auto; width: auto;">
+                                    <option value="multiply">乘以</option>
+                                    <option value="add">加上</option>
+                                    <option value="subtract">减去</option>
+                                </select>
+                                <input type="number" class="form-control" name="copy_price_value" step="0.01" placeholder="数值">
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-success" onclick="executeBatchCopy()">确认复制</button>
+                </div>
+            </div>
+        </div>
+    </div>
     </div>
 </div>
 {% endblock %}
@@ -130,6 +295,7 @@ let pageSize = 20;
 let totalRecords = 0;
 let totalPages = 0;
 let searchParams = {};
+let selectedItems = new Set(); 
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
@@ -163,23 +329,37 @@ function loadSearchOptions() {
 
 // 执行搜索
 async function performSearch(page = 1) {
-    console.log('开始执行搜索，页码:', page);
+    console.log('=== performSearch 开始 ===');
+    console.log('目标页码:', page);
+    console.log('当前页码:', currentPage);
+    console.log('总页数:', totalPages);
+    console.log('每页大小:', pageSize);
+    
+    // 简化元素检查 - 只检查关键元素
+    const tbody = document.getElementById('quotes-tbody');
+    
+    if (!tbody) {
+        console.error('找不到 quotes-tbody 元素');
+        alert('页面元素异常，请刷新页面');
+        return;
+    }
+    
+    console.log('页面元素检查通过');
     
     // 显示加载状态
     showLoading(true);
-
-// 收集搜索参数
-searchParams = {
-    product: document.getElementById('search_product').value.trim(),
-    company: document.getElementById('search_company').value,
-    // 修改时间参数
-    date_start: document.getElementById('search_date_start').value, // 2024-01 格式
-    date_end: document.getElementById('search_date_end').value,     // 2024-12 格式
-    price_min: document.getElementById('search_price_min').value ? parseFloat(document.getElementById('search_price_min').value) : null,
-    price_max: document.getElementById('search_price_max').value ? parseFloat(document.getElementById('search_price_max').value) : null,
-    page: page,
-    page_size: pageSize
-};
+    
+    // 收集搜索参数
+    searchParams = {
+        product: document.getElementById('search_product').value.trim(),
+        company: document.getElementById('search_company').value,
+        date_start: document.getElementById('search_date_start').value,
+        date_end: document.getElementById('search_date_end').value,
+        price_min: document.getElementById('search_price_min').value ? parseFloat(document.getElementById('search_price_min').value) : null,
+        price_max: document.getElementById('search_price_max').value ? parseFloat(document.getElementById('search_price_max').value) : null,
+        page: page,
+        page_size: pageSize
+    };
     
     console.log('搜索参数:', searchParams);
     
@@ -209,11 +389,24 @@ searchParams = {
         
         if (result.success) {
             console.log('搜索成功，数据条数:', result.data.length);
+            
+            // 先更新分页变量，再显示结果
+            if (result.pagination) {
+                currentPage = result.pagination.current_page;
+                totalRecords = result.pagination.total_records;
+                totalPages = result.pagination.total_pages;
+                pageSize = result.pagination.page_size;
+                
+                console.log('分页信息更新:', {
+                    currentPage,
+                    totalRecords,
+                    totalPages,
+                    pageSize
+                });
+            }
+            
             displaySearchResults(result.data);
             updatePagination(result.pagination);
-            currentPage = result.pagination.current_page;
-            totalRecords = result.pagination.total_records;
-            totalPages = result.pagination.total_pages;
         } else {
             console.error('搜索失败:', result.error);
             alert('搜索失败：' + (result.error || '未知错误'));
@@ -227,8 +420,9 @@ searchParams = {
         const tbody = document.getElementById('quotes-tbody');
         tbody.innerHTML = `
             <tr>
-                <td colspan="7" class="text-center text-danger py-4">
+                <td colspan="8" class="text-center text-danger py-4">
                     <i class="fas fa-exclamation-triangle"></i> 搜索失败：${error.message}
+                    <div><span id="status-text">搜索出错</span></div>
                 </td>
             </tr>
         `;
@@ -244,32 +438,55 @@ function displaySearchResults(data) {
     if (data.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="7" class="text-center text-muted py-4">
+                <td colspan="8" class="text-center text-muted py-4">
                     <i class="fas fa-search"></i> 未找到匹配的数据
+                    <div><span id="status-text">搜索完成</span></div>
                 </td>
             </tr>
         `;
+        // 清除选择状态
+        selectedItems.clear();
+        updateBatchToolbar();
+        document.getElementById('selectAll').checked = false;
         return;
     }
     
     tbody.innerHTML = data.map(quote => `
         <tr>
-            <td>${quote.id}</td>
+            <td>
+                <input type="checkbox" class="item-checkbox" value="${quote.id}" 
+                       onchange="toggleItem(${quote.id})">
+            </td>
             <td>${quote.product || '-'}</td>
             <td>${quote.company || '-'}</td>
-            <td class="text-end">${quote.price ? parseFloat(quote.price).toFixed(2) : '-'}</td>
-            <td class="text-end">${quote.qty || '-'}</td>
+            <td class="text-end">¥${quote.price ? parseFloat(quote.price).toFixed(2) : '0.00'}</td>
+            <td class="text-end">${quote.qty || 1}</td>
             <td>${quote.bid_date || '-'}</td>
+            <td>${quote.remarks || '-'}</td>
             <td>
                 <button class="btn btn-sm btn-outline-primary" onclick="editQuote(${quote.id})">
-                    <i class="fas fa-edit"></i> 编辑
+                    <i class="fas fa-edit"></i>
                 </button>
                 <button class="btn btn-sm btn-outline-danger" onclick="deleteQuote(${quote.id})">
-                    <i class="fas fa-trash"></i> 删除
+                    <i class="fas fa-trash"></i>
                 </button>
             </td>
         </tr>
     `).join('');
+    
+    // 添加隐藏的状态元素，确保后续搜索能找到
+    tbody.innerHTML += `
+        <tr style="display: none;">
+            <td colspan="8">
+                <span id="status-text">数据加载完成</span>
+            </td>
+        </tr>
+    `;
+    
+    // 清除之前的选择状态
+    selectedItems.clear();
+    updateBatchToolbar();
+    document.getElementById('selectAll').checked = false;
 }
 
 // 更新分页信息
@@ -297,7 +514,7 @@ function generatePaginationNav(pagination) {
     const prevDisabled = pagination.current_page <= 1 ? 'disabled' : '';
     html += `
         <li class="page-item ${prevDisabled}">
-            <a class="page-link" href="#" onclick="changePage(${pagination.current_page - 1})">上一页</a>
+            <a class="page-link" href="javascript:void(0)" onclick="changePage(${pagination.current_page - 1})">上一页</a>
         </li>
     `;
     
@@ -309,7 +526,7 @@ function generatePaginationNav(pagination) {
         const active = i === pagination.current_page ? 'active' : '';
         html += `
             <li class="page-item ${active}">
-                <a class="page-link" href="#" onclick="changePage(${i})">${i}</a>
+                <a class="page-link" href="javascript:void(0)" onclick="changePage(${i})">${i}</a>
             </li>
         `;
     }
@@ -318,7 +535,7 @@ function generatePaginationNav(pagination) {
     const nextDisabled = pagination.current_page >= pagination.total_pages ? 'disabled' : '';
     html += `
         <li class="page-item ${nextDisabled}">
-            <a class="page-link" href="#" onclick="changePage(${pagination.current_page + 1})">下一页</a>
+            <a class="page-link" href="javascript:void(0)" onclick="changePage(${pagination.current_page + 1})">下一页</a>
         </li>
     `;
     
@@ -327,13 +544,22 @@ function generatePaginationNav(pagination) {
 
 // 切换页码
 function changePage(page) {
-    if (page < 1 || page > totalPages) return;
+    console.log('changePage 被调用，目标页码:', page, '当前页码:', currentPage, '总页数:', totalPages);
+    
+    // 移除严格的页码检查，让服务器端处理
+    if (page < 1) {
+        console.log('页码小于1，忽略');
+        return;
+    }
+    
+    // 不检查最大页码，让服务器返回实际结果
+    console.log('执行页码跳转');
     performSearch(page);
 }
 
-// 改变每页显示条数
 function changePageSize() {
-    pageSize = parseInt(document.getElementById('page-size-select').value);
+    const select = document.querySelector('.form-select[onchange="changePageSize()"]');
+    pageSize = parseInt(select.value);
     performSearch(1); // 重置到第一页
 }
 
@@ -350,15 +576,39 @@ function resetSearch() {
 
 // 显示/隐藏加载状态
 function showLoading(show) {
-    const loadingIcon = document.getElementById('loading-icon');
-    const statusText = document.getElementById('status-text');
+    console.log('showLoading 被调用，参数:', show);
     
-    if (show) {
-        loadingIcon.classList.remove('d-none');
-        statusText.textContent = '搜索中...';
-    } else {
-        loadingIcon.classList.add('d-none');
-        statusText.textContent = '就绪';
+    try {
+        let statusText = document.getElementById('status-text');
+        
+        // 如果找不到status-text，创建一个临时的
+        if (!statusText) {
+            console.warn('status-text 元素不存在，创建临时元素');
+            const tbody = document.getElementById('quotes-tbody');
+            if (tbody) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="8" class="text-center text-muted py-4">
+                            <span id="status-text">${show ? '搜索中...' : '就绪'}</span>
+                        </td>
+                    </tr>
+                `;
+                statusText = document.getElementById('status-text');
+            }
+        }
+        
+        if (statusText) {
+            statusText.textContent = show ? '搜索中...' : '搜索完成';
+        }
+        
+        const loadingContainer = document.getElementById('loading-container');
+        if (loadingContainer) {
+            loadingContainer.style.display = show ? 'block' : 'none';
+        } else {
+            console.warn('loading-container 元素不存在，但这不是致命错误');
+        }
+    } catch (error) {
+        console.error('showLoading 函数出错:', error);
     }
 }
 
@@ -392,5 +642,359 @@ async function deleteQuote(id) {
         alert('删除请求失败，请检查网络连接');
     }
 }
+
+// 修改原有的数据渲染函数，添加复选框
+function renderResults(data) {
+    const tbody = document.getElementById('resultsBody');
+    
+    if (!data || data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">暂无数据</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = data.map(item => `
+        <tr>
+            <td>
+                <input type="checkbox" class="item-checkbox" value="${item.id}" 
+                       onchange="toggleItem(${item.id})">
+            </td>
+            <td>${item.product || ''}</td>
+            <td>${item.company || ''}</td>
+            <td>¥${item.price ? parseFloat(item.price).toFixed(2) : '0.00'}</td>
+            <td>${item.qty || 1}</td>
+            <td>${item.bid_date || ''}</td>
+            <td>${item.remarks || ''}</td>
+            <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="editItem(${item.id})">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteItem(${item.id})">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        </tr>
+    `).join('');
+    
+    // 清除选择状态
+    selectedItems.clear();
+    updateBatchToolbar();
+    document.getElementById('selectAll').checked = false;
+}
+
+// 全选/反选
+function toggleSelectAll() {
+    const selectAll = document.getElementById('selectAll');
+    const checkboxes = document.querySelectorAll('.item-checkbox');
+    
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = selectAll.checked;
+        const id = parseInt(checkbox.value);
+        if (selectAll.checked) {
+            selectedItems.add(id);
+        } else {
+            selectedItems.delete(id);
+        }
+    });
+    
+    updateBatchToolbar();
+}
+
+// 单项选择/取消
+function toggleItem(id) {
+    const checkbox = document.querySelector(`.item-checkbox[value="${id}"]`);
+    
+    if (checkbox.checked) {
+        selectedItems.add(id);
+    } else {
+        selectedItems.delete(id);
+    }
+    
+    // 更新全选状态
+    const allCheckboxes = document.querySelectorAll('.item-checkbox');
+    const checkedCheckboxes = document.querySelectorAll('.item-checkbox:checked');
+    document.getElementById('selectAll').checked = allCheckboxes.length > 0 && allCheckboxes.length === checkedCheckboxes.length;
+    
+    updateBatchToolbar();
+}
+
+// 更新批量操作工具栏
+function updateBatchToolbar() {
+    const toolbar = document.getElementById('batchToolbar');
+    const countSpan = document.getElementById('selectedCount');
+    
+    if (selectedItems.size > 0) {
+        toolbar.style.display = 'block';
+        countSpan.textContent = selectedItems.size;
+    } else {
+        toolbar.style.display = 'none';
+    }
+}
+
+// 清除选择
+function clearSelection() {
+    selectedItems.clear();
+    document.querySelectorAll('.item-checkbox').forEach(cb => cb.checked = false);
+    document.getElementById('selectAll').checked = false;
+    updateBatchToolbar();
+}
+
+// 批量删除
+function batchDelete() {
+    if (selectedItems.size === 0) return;
+    
+    if (confirm(`确定要删除选中的 ${selectedItems.size} 条记录吗？`)) {
+        const ids = Array.from(selectedItems);
+        
+        fetch('/api/smart_quotes/batch_delete', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ ids: ids })
+        })
+        .then(response => response.json())
+        .then(result => {
+            if (result.success) {
+                showMessage(`成功删除 ${result.deleted_count} 条记录`, 'success');
+                clearSelection();
+                performSearch(); // 重新搜索
+            } else {
+                showMessage('删除失败：' + result.error, 'error');
+            }
+        })
+        .catch(error => {
+            console.error('删除出错:', error);
+            showMessage('删除出错', 'error');
+        });
+    }
+}
+
+// 显示批量修改对话框
+function showBatchEdit() {
+    if (selectedItems.size === 0) return;
+    
+    // 初始化年份月份选项
+    initializeDateSelectors();
+    
+    // 显示模态框
+    const modal = new bootstrap.Modal(document.getElementById('batchEditModal'));
+    modal.show();
+    
+    // 绑定字段显示/隐藏逻辑
+    document.querySelectorAll('input[name="edit_fields"]').forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            const fieldId = this.value + 'Field';
+            const fieldDiv = document.getElementById(fieldId);
+            if (fieldDiv) {
+                fieldDiv.style.display = this.checked ? 'block' : 'none';
+            }
+        });
+    });
+}
+
+// 执行批量修改
+function executeBatchEdit() {
+    const form = document.getElementById('batchEditForm');
+    const formData = new FormData(form);
+    
+    const editFields = Array.from(document.querySelectorAll('input[name="edit_fields"]:checked'))
+                           .map(cb => cb.value);
+    
+    if (editFields.length === 0) {
+        showMessage('请至少选择一个要修改的项目', 'warning');
+        return;
+    }
+    
+    const updateData = {
+        ids: Array.from(selectedItems),
+        fields: {}
+    };
+    
+    // 处理各字段的修改
+    if (editFields.includes('company')) {
+        updateData.fields.company = formData.get('new_company');
+    }
+    
+    if (editFields.includes('date')) {
+        const year = formData.get('new_year');
+        const month = formData.get('new_month');
+        if (year && month) {
+            updateData.fields.bid_date = `${year}-${month.padStart(2, '0')}-01`;
+        }
+    }
+    
+    if (editFields.includes('price')) {
+        updateData.fields.price_adjustment = {
+            action: formData.get('price_action'),
+            value: parseFloat(formData.get('price_value'))
+        };
+    }
+    
+    fetch('/api/smart_quotes/batch_update', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updateData)
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            showMessage(`成功修改 ${result.updated_count} 条记录`, 'success');
+            bootstrap.Modal.getInstance(document.getElementById('batchEditModal')).hide();
+            clearSelection();
+            performSearch();
+        } else {
+            showMessage('修改失败：' + result.error, 'error');
+        }
+    })
+    .catch(error => {
+        console.error('修改出错:', error);
+        showMessage('修改出错', 'error');
+    });
+}
+
+// 批量导出
+function batchExport() {
+    if (selectedItems.size === 0) return;
+    
+    const ids = Array.from(selectedItems);
+    
+    // 创建一个隐藏的表单来提交导出请求
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/api/smart_quotes/batch_export';
+    form.style.display = 'none';
+    
+    const input = document.createElement('input');
+    input.name = 'ids';
+    input.value = JSON.stringify(ids);
+    form.appendChild(input);
+    
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
+}
+
+// 显示批量复制对话框
+function showBatchCopy() {
+    if (selectedItems.size === 0) return;
+    
+    document.getElementById('copyCount').textContent = selectedItems.size;
+    initializeDateSelectors();
+    
+    // 清除之前的事件监听器
+    const adjustPriceCheckbox = document.getElementById('adjustPrice');
+    const newCheckbox = adjustPriceCheckbox.cloneNode(true);
+    adjustPriceCheckbox.parentNode.replaceChild(newCheckbox, adjustPriceCheckbox);
+    
+    // 重新绑定事件监听器
+    document.getElementById('adjustPrice').addEventListener('change', function() {
+        document.getElementById('priceAdjustField').style.display = this.checked ? 'block' : 'none';
+    });
+    
+    const modal = new bootstrap.Modal(document.getElementById('batchCopyModal'));
+    modal.show();
+}
+
+// 执行批量复制
+function executeBatchCopy() {
+    const form = document.getElementById('batchCopyForm');
+    const formData = new FormData(form);
+    
+    const copyData = {
+        ids: Array.from(selectedItems),
+        target_company: formData.get('target_company'),
+        target_date: `${formData.get('target_year')}-${formData.get('target_month').padStart(2, '0')}-01`,
+        price_adjustment: null
+    };
+    
+    if (document.getElementById('adjustPrice').checked) {
+        copyData.price_adjustment = {
+            action: formData.get('copy_price_action'),
+            value: parseFloat(formData.get('copy_price_value'))
+        };
+    }
+    
+    fetch('/api/smart_quotes/batch_copy', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(copyData)
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            showMessage(`成功复制 ${result.copied_count} 条记录`, 'success');
+            bootstrap.Modal.getInstance(document.getElementById('batchCopyModal')).hide();
+            clearSelection();
+            performSearch();
+        } else {
+            showMessage('复制失败：' + result.error, 'error');
+        }
+    })
+    .catch(error => {
+        console.error('复制出错:', error);
+        showMessage('复制出错', 'error');
+    });
+}
+
+// 初始化年份月份选择器
+function initializeDateSelectors() {
+    const currentYear = new Date().getFullYear();
+    
+    // 年份选择器
+    document.querySelectorAll('select[name="new_year"], select[name="target_year"]').forEach(select => {
+        select.innerHTML = '<option value="">选择年份</option>';
+        for (let year = currentYear - 2; year <= currentYear + 2; year++) {
+            const option = document.createElement('option');
+            option.value = year;
+            option.textContent = year + '年';
+            if (year === currentYear) option.selected = true;
+            select.appendChild(option);
+        }
+    });
+    
+    // 月份选择器
+    document.querySelectorAll('select[name="new_month"], select[name="target_month"]').forEach(select => {
+        select.innerHTML = '<option value="">选择月份</option>';
+        for (let month = 1; month <= 12; month++) {
+            const option = document.createElement('option');
+            option.value = month;
+            option.textContent = month + '月';
+            select.appendChild(option);
+        }
+    });
+}
+
+// 添加缺失的消息提示函数
+function showMessage(message, type = 'info') {
+    // 创建一个简单的提示框
+    const alertClass = {
+        'success': 'alert-success',
+        'error': 'alert-danger',
+        'warning': 'alert-warning',
+        'info': 'alert-info'
+    };
+    
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert ${alertClass[type] || 'alert-info'} alert-dismissible fade show position-fixed`;
+    alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+    alertDiv.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    document.body.appendChild(alertDiv);
+    
+    // 3秒后自动移除
+    setTimeout(() => {
+        if (alertDiv.parentNode) {
+            alertDiv.parentNode.removeChild(alertDiv);
+        }
+    }, 3000);
+}
+
 </script>
 {% endblock %}

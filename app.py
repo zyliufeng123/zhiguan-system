@@ -468,19 +468,31 @@ def process_smart_quote_import_new(filepath, product_col, price_col, qty_col,
                     errors.append(f'第{idx+2}行: 中标价格必须大于0')
                     continue
                 
-                # 冲突检查
-                if conflict_mode == 'skip':
-                    existing = cur.execute(
-                        'SELECT id FROM quotes WHERE product=? AND company=? AND bid_date=?',
-                        (product_name, company_name, bid_date)
-                    ).fetchone()
-                    if existing:
+                # 修复：完整的冲突检查逻辑
+                existing = cur.execute(
+                    'SELECT id, price FROM quotes WHERE product=? AND company=? AND bid_date=?',
+                    (product_name, company_name, bid_date)
+                ).fetchone()
+                
+                if existing:
+                    if conflict_mode == 'skip':
+                        skip_count += 1
+                        continue  # 跳过这条记录
+                    elif conflict_mode == 'overwrite' or conflict_mode == 'replace':
+                        # 更新现有记录
+                        cur.execute('''
+                            UPDATE quotes SET price=?, qty=?, remarks=? WHERE id=?
+                        ''', (price_value, qty_value, f'更新_{datetime.now().strftime("%Y%m%d")}', existing[0]))
+                        success_count += 1
+                        continue
+                    else:
+                        # 默认跳过
                         skip_count += 1
                         continue
                 
-                # 插入数据
+                # 插入新记录（只有在没有冲突或已处理冲突时才执行）
                 cur.execute('''
-                    INSERT OR REPLACE INTO quotes (product, company, price, qty, bid_date, remarks)
+                    INSERT INTO quotes (product, company, price, qty, bid_date, remarks)
                     VALUES (?, ?, ?, ?, ?, ?)
                 ''', (product_name, company_name, price_value, qty_value, bid_date, 
                      f'批量导入_{datetime.now().strftime("%Y%m%d")}'))
@@ -567,7 +579,7 @@ def api_smart_quote_delete():
 @app.route('/api/smart_quote/search', methods=['POST'])
 @login_required
 def api_smart_quote_search():
-    """智能报价搜索API - 支持分页"""
+    """智能报价搜索API - 支持分页和去重"""
     try:
         data = request.get_json()
         if not data:
@@ -576,8 +588,8 @@ def api_smart_quote_search():
         # 搜索条件
         product = data.get('product', '').strip()
         company = data.get('company', '').strip()  
-        date_start = data.get('date_start', '').strip()  # 2024-01 格式
-        date_end = data.get('date_end', '').strip()      # 2024-12 格式
+        date_start = data.get('date_start', '').strip()
+        date_end = data.get('date_end', '').strip()
         price_min = data.get('price_min')
         price_max = data.get('price_max')
         
@@ -601,30 +613,24 @@ def api_smart_quote_search():
             where_conditions.append('company = ?')
             params.append(company)
             
-        # 修改时间查询逻辑
         if date_start:
             where_conditions.append('bid_date >= ?')
-            params.append(f'{date_start}-01')  # 2024-01-01
+            params.append(f'{date_start}-01')
             
         if date_end:
             try:
-                # 计算该月的最后一天
                 year, month = date_end.split('-')
                 year, month = int(year), int(month)
                 
                 if month == 12:
-                    next_year = year + 1
-                    next_month = 1
+                    next_year, next_month = year + 1, 1
                 else:
-                    next_year = year
-                    next_month = month + 1
+                    next_year, next_month = year, month + 1
                     
                 where_conditions.append('bid_date < ?')
                 params.append(f'{next_year:04d}-{next_month:02d}-01')
             except (ValueError, TypeError) as e:
                 logger.warning(f"时间格式错误: {date_end}, 错误: {e}")
-                # 如果格式错误，忽略结束时间条件
-                pass
             
         if price_min is not None:
             where_conditions.append('price >= ?')
@@ -636,19 +642,35 @@ def api_smart_quote_search():
         
         where_clause = ' AND '.join(where_conditions)
         
-        # 查询总数
-        count_sql = f'SELECT COUNT(*) FROM quotes WHERE {where_clause}'
+        # 修复：使用CTE和ROW_NUMBER进行去重，保留最新记录
+        count_sql = f'''
+            WITH deduplicated AS (
+                SELECT id, product, company, price, qty, bid_date, remarks,
+                       ROW_NUMBER() OVER (PARTITION BY product, company, bid_date ORDER BY id DESC) as rn
+                FROM quotes 
+                WHERE {where_clause}
+            )
+            SELECT COUNT(*) FROM deduplicated WHERE rn = 1
+        '''
         total = cur.execute(count_sql, params).fetchone()[0]
         
-        # 查询分页数据
+        # 查询去重后的分页数据
         data_sql = f'''
-            SELECT id, product, company, price, qty, bid_date, remarks FROM quotes WHERE {where_clause} 
+            WITH deduplicated AS (
+                SELECT id, product, company, price, qty, bid_date, remarks,
+                       ROW_NUMBER() OVER (PARTITION BY product, company, bid_date ORDER BY id DESC) as rn
+                FROM quotes 
+                WHERE {where_clause}
+            )
+            SELECT id, product, company, price, qty, bid_date, remarks
+            FROM deduplicated 
+            WHERE rn = 1
             ORDER BY bid_date DESC, id DESC 
             LIMIT ? OFFSET ?
         '''
         results = cur.execute(data_sql, params + [page_size, offset]).fetchall()
         
-        # 获取公司列表（保持不变）
+        # 获取公司列表
         companies_sql = 'SELECT DISTINCT company FROM quotes WHERE company IS NOT NULL AND company != "" ORDER BY company'
         companies = cur.execute(companies_sql).fetchall()
         
@@ -2316,6 +2338,264 @@ def enhance_column_reference_replacement(expression, table_data, row_index, colu
                 expression = re.sub(r'\b' + re.escape(header) + r'\b', str(value), expression)
     
     return expression
+
+# 批量删除
+@app.route('/api/smart_quotes/batch_delete', methods=['POST'])
+@login_required
+def api_batch_delete():
+    """批量删除智能报价记录"""
+    try:
+        data = request.get_json()
+        ids = data.get('ids', [])
+        
+        if not ids:
+            return jsonify({'success': False, 'error': '未选择要删除的记录'})
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 删除记录
+        placeholders = ','.join(['?' for _ in ids])
+        cur.execute(f'DELETE FROM quotes WHERE id IN ({placeholders})', ids)
+        
+        deleted_count = cur.rowcount
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'deleted_count': deleted_count
+        })
+        
+    except Exception as e:
+        logger.exception("批量删除错误")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# 批量修改
+@app.route('/api/smart_quotes/batch_update', methods=['POST'])
+@login_required
+def api_batch_update():
+    """批量修改智能报价记录"""
+    try:
+        data = request.get_json()
+        ids = data.get('ids', [])
+        fields = data.get('fields', {})
+        
+        if not ids:
+            return jsonify({'success': False, 'error': '未选择要修改的记录'})
+        
+        if not fields:
+            return jsonify({'success': False, 'error': '未指定修改内容'})
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        updated_count = 0
+        
+        for quote_id in ids:
+            updates = []
+            params = []
+            
+            # 处理公司修改
+            if 'company' in fields and fields['company']:
+                updates.append('company = ?')
+                params.append(fields['company'])
+            
+            # 处理日期修改
+            if 'bid_date' in fields and fields['bid_date']:
+                updates.append('bid_date = ?')
+                params.append(fields['bid_date'])
+            
+            # 处理价格调整
+            if 'price_adjustment' in fields and fields['price_adjustment']:
+                adjustment = fields['price_adjustment']
+                action = adjustment.get('action')
+                value = adjustment.get('value')
+                
+                if action and value is not None:
+                    # 获取当前价格
+                    cur.execute('SELECT price FROM quotes WHERE id = ?', (quote_id,))
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        current_price = float(row[0])
+                        new_price = current_price
+                        
+                        if action == 'multiply':
+                            new_price = current_price * value
+                        elif action == 'add':
+                            new_price = current_price + value
+                        elif action == 'subtract':
+                            new_price = current_price - value
+                        elif action == 'set':
+                            new_price = value
+                        
+                        if new_price > 0:  # 确保价格为正
+                            updates.append('price = ?')
+                            params.append(new_price)
+            
+            # 执行更新
+            if updates:
+                params.append(quote_id)
+                sql = f'UPDATE quotes SET {", ".join(updates)} WHERE id = ?'
+                cur.execute(sql, params)
+                updated_count += cur.rowcount
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'updated_count': updated_count
+        })
+        
+    except Exception as e:
+        logger.exception("批量修改错误")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# 批量复制
+@app.route('/api/smart_quotes/batch_copy', methods=['POST'])
+@login_required
+def api_batch_copy():
+    """批量复制智能报价记录"""
+    try:
+        data = request.get_json()
+        ids = data.get('ids', [])
+        target_company = data.get('target_company')
+        target_date = data.get('target_date')
+        price_adjustment = data.get('price_adjustment')
+        
+        if not ids:
+            return jsonify({'success': False, 'error': '未选择要复制的记录'})
+        
+        if not target_company or not target_date:
+            return jsonify({'success': False, 'error': '目标公司和日期不能为空'})
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        copied_count = 0
+        
+        # 获取要复制的记录
+        placeholders = ','.join(['?' for _ in ids])
+        cur.execute(f'SELECT product, price, qty, remarks FROM quotes WHERE id IN ({placeholders})', ids)
+        records = cur.fetchall()
+        
+        for record in records:
+            product, price, qty, remarks = record
+            
+            # 处理价格调整
+            new_price = float(price) if price else 0
+            if price_adjustment:
+                action = price_adjustment.get('action')
+                value = price_adjustment.get('value')
+                
+                if action and value is not None:
+                    if action == 'multiply':
+                        new_price = new_price * value
+                    elif action == 'add':
+                        new_price = new_price + value
+                    elif action == 'subtract':
+                        new_price = new_price - value
+            
+            # 检查是否已存在相同记录
+            cur.execute(
+                'SELECT id FROM quotes WHERE product=? AND company=? AND bid_date=?',
+                (product, target_company, target_date)
+            )
+            existing = cur.fetchone()
+            
+            if existing:
+                # 更新现有记录
+                cur.execute(
+                    'UPDATE quotes SET price=?, qty=?, remarks=? WHERE id=?',
+                    (new_price, qty, f'批量复制_{datetime.now().strftime("%Y%m%d")}', existing[0])
+                )
+            else:
+                # 插入新记录
+                cur.execute('''
+                    INSERT INTO quotes (product, company, price, qty, bid_date, remarks)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (product, target_company, new_price, qty, target_date, 
+                     f'批量复制_{datetime.now().strftime("%Y%m%d")}'))
+            
+            copied_count += 1
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'copied_count': copied_count
+        })
+        
+    except Exception as e:
+        logger.exception("批量复制错误")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# 批量导出
+@app.route('/api/smart_quotes/batch_export', methods=['POST'])
+@login_required
+def api_batch_export():
+    """批量导出智能报价记录到Excel"""
+    try:
+        ids_json = request.form.get('ids')
+        if not ids_json:
+            return jsonify({'success': False, 'error': '未选择要导出的记录'})
+        
+        ids = json.loads(ids_json)
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 获取选中的记录
+        placeholders = ','.join(['?' for _ in ids])
+        cur.execute(f'''
+            SELECT product, company, price, qty, bid_date, remarks
+            FROM quotes 
+            WHERE id IN ({placeholders})
+            ORDER BY bid_date DESC, product
+        ''', ids)
+        
+        records = cur.fetchall()
+        conn.close()
+        
+        if not records:
+            return jsonify({'success': False, 'error': '没有找到要导出的记录'})
+        
+        # 创建Excel文件
+        import io
+        output = io.BytesIO()
+        
+        if pd is not None:
+            # 使用pandas创建Excel
+            df = pd.DataFrame(records, columns=['产品名称', '中标公司', '中标价格', '预计用量', '中标年月', '备注'])
+            df.to_excel(output, index=False, engine='openpyxl')
+        else:
+            # 简单的CSV格式
+            import csv
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(['产品名称', '中标公司', '中标价格', '预计用量', '中标年月', '备注'])
+            writer.writerows(records)
+        
+        output.seek(0)
+        
+        # 生成文件名
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'智能报价导出_{timestamp}.xlsx' if pd else f'智能报价导出_{timestamp}.csv'
+        
+        # 返回文件
+        from flask import send_file
+        return send_file(
+            output if pd else io.BytesIO(output.getvalue().encode('utf-8-sig')),
+            as_attachment=True,
+            download_name=filename,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' if pd else 'text/csv'
+        )
+        
+    except Exception as e:
+        logger.exception("批量导出错误")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
         app.run(debug=True, host='0.0.0.0', port=5000)
