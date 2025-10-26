@@ -83,13 +83,6 @@ def _parse_number(v):
     except Exception:
         return None
 
-# 简单占位登录装饰器（若项目已有认证逻辑，请替换）
-def login_required(f):
-    @wraps(f)
-    def _wrap(*a, **kw):
-        return f(*a, **kw)
-    return _wrap
-
 # --- 新增：基础变量与工具函数（必须） ---
 # 上传/临时相关常量（放在 imports 之后、app.config 使用之前）
 MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100 MB
@@ -296,6 +289,8 @@ def smart_quote_data():
         return jsonify({"error": str(e)}), 500
 
 # 批量导入（上传 -> 映射 -> 导入）
+# 完全替换第240-347行的内容
+
 @app.route('/smart_quote/bulk', methods=['GET','POST'])
 @login_required
 def smart_quote_bulk():
@@ -328,6 +323,22 @@ def smart_quote_bulk():
                     df = pd.read_excel(filepath, nrows=5)
                 
                 columns = df.columns.tolist()
+                
+                # 添加产品名称清洗功能
+                def clean_product_name(name):
+                    """清洗产品名称：删除-及后面的内容"""
+                    if pd.isna(name):
+                        return ''
+                    name_str = str(name).strip()
+                    if '-' in name_str:
+                        return name_str.split('-')[0].strip()
+                    return name_str
+                
+                # 预处理数据：清洗所有列的产品名称（因为不知道哪列是产品名称）
+                for col in columns:
+                    if df[col].dtype == 'object':  # 只处理文本列
+                        df[col] = df[col].apply(clean_product_name)
+                
                 preview_data = df.head().to_dict('records')
                 
                 # 获取已有公司列表
@@ -362,7 +373,145 @@ def smart_quote_bulk():
     except Exception as e:
         flash(f'上传失败: {str(e)}')
         return redirect(request.url)
+
+@app.route('/smart_quote/import', methods=['POST'])
+@login_required
+def smart_quote_import():
+    """处理智能报价导入"""
+    try:
+        temp_id = request.form.get('temp_id')
+        product_col = request.form.get('product_col')
+        price_col = request.form.get('price_col')
+        qty_col = request.form.get('qty_col')
+        company_name = request.form.get('company_name')
+        bid_year = request.form.get('bid_year')
+        bid_month = request.form.get('bid_month')
+        
+        if not all([temp_id, product_col, price_col, company_name, bid_year, bid_month]):
+            flash('请填写所有必填字段')
+            return redirect(url_for('smart_quote_bulk'))
+        
+        # 构建日期
+        bid_date = f"{bid_year}-{int(bid_month):02d}-01"
+        
+        # 查找临时文件
+        filepath = _locate_temp_file(temp_id)
+        if not filepath:
+            flash('临时文件不存在或已过期')
+            return redirect(url_for('smart_quote_bulk'))
+        
+        # 执行导入
+        result = process_smart_quote_import_new(
+            filepath, product_col, price_col, qty_col,
+            company_name, bid_date, 'overwrite'
+        )
+        
+        if result['success']:
+            flash(f"导入成功！成功：{result['success_count']}，跳过：{result['skip_count']}，失败：{result['error_count']}")
+        else:
+            flash(f"导入失败：{result['error']}")
+        
+        return redirect(url_for('smart_quote'))
+        
+    except Exception as e:
+        logger.exception("导入处理失败")
+        flash(f'导入处理失败: {str(e)}')
+        return redirect(url_for('smart_quote_bulk'))
+        
+def process_smart_quote_import_new(filepath, product_col, price_col, qty_col, 
+                                  company_name, bid_date, conflict_mode):
+    """新的导入处理逻辑 - 统一公司和日期"""
     
+    # 产品名称清洗函数
+    def clean_product_name(name):
+        """清洗产品名称：删除-及后面的内容"""
+        if pd.isna(name):
+            return ''
+        name_str = str(name).strip()
+        if '-' in name_str:
+            return name_str.split('-')[0].strip()
+        return name_str
+    
+    try:
+        # 读取文件
+        if filepath.lower().endswith('.csv'):
+            df = pd.read_csv(filepath, encoding='utf-8')
+        else:
+            df = pd.read_excel(filepath)
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        success_count = 0
+        skip_count = 0
+        error_count = 0
+        errors = []
+        
+        for idx, row in df.iterrows():
+            try:
+                # 从Excel读取的数据并清洗产品名称
+                raw_product_name = str(row.get(product_col, '')).strip()
+                product_name = clean_product_name(raw_product_name)
+                
+                price_value = _parse_number(row.get(price_col))
+                qty_value = int(_parse_number(row.get(qty_col)) or 1) if qty_col else 1
+                
+                # 必填字段验证
+                if not product_name or price_value is None:
+                    error_count += 1
+                    errors.append(f'第{idx+2}行: 产品名称或中标价格为空')
+                    continue
+                
+                # 价格合理性验证
+                if price_value <= 0:
+                    error_count += 1
+                    errors.append(f'第{idx+2}行: 中标价格必须大于0')
+                    continue
+                
+                # 冲突检查
+                if conflict_mode == 'skip':
+                    existing = cur.execute(
+                        'SELECT id FROM quotes WHERE product=? AND company=? AND bid_date=?',
+                        (product_name, company_name, bid_date)
+                    ).fetchone()
+                    if existing:
+                        skip_count += 1
+                        continue
+                
+                # 插入数据
+                cur.execute('''
+                    INSERT OR REPLACE INTO quotes (product, company, price, qty, bid_date, remarks)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (product_name, company_name, price_value, qty_value, bid_date, 
+                     f'批量导入_{datetime.now().strftime("%Y%m%d")}'))
+                
+                success_count += 1
+                
+            except Exception as e:
+                error_count += 1
+                errors.append(f'第{idx+2}行: {str(e)}')
+                logger.exception(f"导入第{idx+1}行时出错")
+        
+        conn.commit()
+        conn.close()
+        
+        # 清理临时文件
+        try:
+            os.remove(filepath)
+        except:
+            pass
+        
+        return {
+            'success': True,
+            'success_count': success_count,
+            'skip_count': skip_count,
+            'error_count': error_count,
+            'errors': errors[:10]
+        }
+        
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
 @app.route('/api/companies')
 @login_required
 def api_companies():
@@ -413,55 +562,130 @@ def api_smart_quote_delete():
     conn.close()
     return jsonify({"success": True})
 
-@app.route('/smart_quote/bulk/import', methods=['POST'])
-@login_required
-def smart_quote_bulk_import():
-    """处理智能报价批量导入的映射配置"""
-    try:
-        # 获取表单数据
-        temp_id = request.form.get('temp_id')
-        product_col = request.form.get('product_col')
-        price_col = request.form.get('price_col')  # 现在是中标价格
-        qty_col = request.form.get('qty_col')     # 现在是预计用量
-        
-        # 获取手动输入的数据
-        company_name = request.form.get('company_name')
-        bid_year = request.form.get('bid_year')
-        bid_month = request.form.get('bid_month')
-        conflict_mode = request.form.get('conflict_mode', 'skip')
+# 找到 api_smart_quote_search 函数，大约在第350行左右
 
-        # 参数验证
-        if not all([temp_id, product_col, price_col, company_name, bid_year, bid_month]):
-            flash('请完整填写必填字段（产品列、中标价格列、公司名称、中标年月）')
-            return redirect(url_for('smart_quote_bulk'))
+@app.route('/api/smart_quote/search', methods=['POST'])
+@login_required
+def api_smart_quote_search():
+    """智能报价搜索API - 支持分页"""
+    try:
+        data = request.get_json()
+        if not data:
+            data = {}
         
-        # 查找临时文件
-        filepath = _locate_temp_file(temp_id)
-        if not filepath:
-            flash('临时文件不存在或已过期，请重新上传')
-            return redirect(url_for('smart_quote_bulk'))
+        # 搜索条件
+        product = data.get('product', '').strip()
+        company = data.get('company', '').strip()  
+        date_start = data.get('date_start', '').strip()  # 2024-01 格式
+        date_end = data.get('date_end', '').strip()      # 2024-12 格式
+        price_min = data.get('price_min')
+        price_max = data.get('price_max')
         
-        # 格式化中标日期 - 修复字符串格式化问题
-        bid_date = f"{bid_year}-{int(bid_month):02d}-01"  # 统一使用月份第一天
+        # 分页参数
+        page = int(data.get('page', 1))
+        page_size = int(data.get('page_size', 20))
+        offset = (page - 1) * page_size
         
-        # 处理导入
-        result = process_smart_quote_import_new(
-            filepath, product_col, price_col, qty_col,
-            company_name, bid_date, conflict_mode
-        )
+        conn = get_db()
+        cur = conn.cursor()
         
-        # 导入结果反馈
-        if result['success']:
-            flash(f'导入完成！成功: {result["success_count"]} 条，跳过: {result["skip_count"]} 条，失败: {result["error_count"]} 条')
-        else:
-            flash(f'导入失败: {result["error"]}')
+        # 构建查询条件
+        where_conditions = ['1=1']
+        params = []
+        
+        if product:
+            where_conditions.append('product LIKE ?')
+            params.append(f'%{product}%')
+        
+        if company:
+            where_conditions.append('company = ?')
+            params.append(company)
             
-        return redirect(url_for('smart_quote'))
+        # 修改时间查询逻辑
+        if date_start:
+            where_conditions.append('bid_date >= ?')
+            params.append(f'{date_start}-01')  # 2024-01-01
+            
+        if date_end:
+            try:
+                # 计算该月的最后一天
+                year, month = date_end.split('-')
+                year, month = int(year), int(month)
+                
+                if month == 12:
+                    next_year = year + 1
+                    next_month = 1
+                else:
+                    next_year = year
+                    next_month = month + 1
+                    
+                where_conditions.append('bid_date < ?')
+                params.append(f'{next_year:04d}-{next_month:02d}-01')
+            except (ValueError, TypeError) as e:
+                logger.warning(f"时间格式错误: {date_end}, 错误: {e}")
+                # 如果格式错误，忽略结束时间条件
+                pass
+            
+        if price_min is not None:
+            where_conditions.append('price >= ?')
+            params.append(float(price_min))
+            
+        if price_max is not None:
+            where_conditions.append('price <= ?')
+            params.append(float(price_max))
+        
+        where_clause = ' AND '.join(where_conditions)
+        
+        # 查询总数
+        count_sql = f'SELECT COUNT(*) FROM quotes WHERE {where_clause}'
+        total = cur.execute(count_sql, params).fetchone()[0]
+        
+        # 查询分页数据
+        data_sql = f'''
+            SELECT id, product, company, price, qty, bid_date, remarks FROM quotes WHERE {where_clause} 
+            ORDER BY bid_date DESC, id DESC 
+            LIMIT ? OFFSET ?
+        '''
+        results = cur.execute(data_sql, params + [page_size, offset]).fetchall()
+        
+        # 获取公司列表（保持不变）
+        companies_sql = 'SELECT DISTINCT company FROM quotes WHERE company IS NOT NULL AND company != "" ORDER BY company'
+        companies = cur.execute(companies_sql).fetchall()
+        
+        conn.close()
+        
+        # 转换结果为字典格式
+        data_list = []
+        for row in results:
+            data_list.append({
+                'id': row[0],
+                'product': row[1],
+                'company': row[2],
+                'price': row[3],
+                'qty': row[4],
+                'bid_date': row[5],
+                'remarks': row[6] if len(row) > 6 else None
+            })
+        
+        result = {
+            'success': True,
+            'data': data_list,
+            'pagination': {
+                'current_page': page,
+                'page_size': page_size,
+                'total_records': total,
+                'total_pages': (total + page_size - 1) // page_size
+            },
+            'options': {
+                'companies': [row[0] for row in companies]
+            }
+        }
+        
+        return jsonify(result)
         
     except Exception as e:
-        logger.exception("批量导入错误")
-        flash(f'导入失败: {str(e)}')
-        return redirect(url_for('smart_quote_bulk'))
+        logger.exception("搜索错误")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # ========== 公式（安全执行） ==========
 @app.route('/formula', methods=['GET', 'POST'])
@@ -1413,86 +1637,7 @@ def _process_import_task(task_id, filepath, mapping, conflict_mode):
     finally:
         conn.close()
 
-def process_smart_quote_import_new(filepath, product_col, price_col, qty_col, 
-                                  company_name, bid_date, conflict_mode):
-    """新的导入处理逻辑 - 统一公司和日期"""
-    try:
-        # 读取文件
-        if filepath.lower().endswith('.csv'):
-            df = pd.read_csv(filepath, encoding='utf-8')
-        else:
-            df = pd.read_excel(filepath)
-        
-        conn = get_db()
-        cur = conn.cursor()
-        
-        success_count = 0
-        skip_count = 0
-        error_count = 0
-        errors = []
-        
-        for idx, row in df.iterrows():
-            try:
-                # 从Excel读取的数据
-                product_name = str(row.get(product_col, '')).strip()
-                price_value = _parse_number(row.get(price_col))
-                qty_value = int(_parse_number(row.get(qty_col)) or 1) if qty_col else 1
-                
-                # 必填字段验证
-                if not product_name or price_value is None:
-                    error_count += 1
-                    errors.append(f'第{idx+2}行: 产品名称或中标价格为空')
-                    continue
-                
-                # 价格合理性验证
-                if price_value <= 0:
-                    error_count += 1
-                    errors.append(f'第{idx+2}行: 中标价格必须大于0')
-                    continue
-                
-                # 冲突检查
-                if conflict_mode == 'skip':
-                    existing = cur.execute(
-                        'SELECT id FROM quotes WHERE product=? AND company=? AND bid_date=?',
-                        (product_name, company_name, bid_date)
-                    ).fetchone()
-                    if existing:
-                        skip_count += 1
-                        continue
-                
-                # 插入数据（使用统一的公司和日期）
-                cur.execute('''
-                    INSERT OR REPLACE INTO quotes (product, company, price, qty, bid_date, remarks)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (product_name, company_name, price_value, qty_value, bid_date, 
-                     f'批量导入_{datetime.now().strftime("%Y%m%d")}'))
-                
-                success_count += 1
-                
-            except Exception as e:
-                error_count += 1
-                errors.append(f'第{idx+2}行: {str(e)}')
-                logger.exception(f"导入第{idx+1}行时出错")
-        
-        conn.commit()
-        conn.close()
-        
-        # 清理临时文件
-        try:
-            os.remove(filepath)
-        except:
-            pass
-        
-        return {
-            'success': True,
-            'success_count': success_count,
-            'skip_count': skip_count,
-            'error_count': error_count,
-            'errors': errors[:10]
-        }
-        
-    except Exception as e:
-        return {'success': False, 'error': str(e)}
+
 
 @app.route('/api/fields/add', methods=['POST'])
 @login_required

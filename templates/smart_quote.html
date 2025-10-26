@@ -1,65 +1,396 @@
-<!DOCTYPE html>
-<html lang="zh">
-<head>
-  <meta charset="utf-8">
-  <title>智能报价</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/custom.css') }}">
-</head>
-<body>
 {% extends "base.html" %}
 {% block title %}智能报价 - 智管{% endblock %}
+
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h4>智能报价</h4>
-  <div>
-    <!-- 已实现的批量导入页面 -->
-    <a class="btn btn-success me-2" href="{{ url_for('smart_quote_bulk') }}" id="btn-bulk-import">批量导入</a>
+<div class="container-fluid">
+    <!-- 页面标题 -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4>智能报价</h4>
+        <div>
+            <a class="btn btn-success" href="{{ url_for('smart_quote_bulk') }}">
+                <i class="fas fa-upload"></i> 批量导入
+            </a>
+        </div>
+    </div>
 
-    <!-- 公式编辑占位：改为静态路径，若后端存在 route 可替换为 url_for(...) -->
-    <a class="btn btn-outline-secondary" href="/formula/editor" id="btn-formula-editor">公式编辑</a>
-  </div>
+    <!-- 搜索区域 -->
+    <div class="card mb-3">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="fas fa-search"></i> 智能检索</h5>
+        </div>
+        <div class="card-body">
+            <!-- 调整搜索区域的列宽分布 -->
+
+<div class="row">
+    <div class="col-md-3">
+        <label class="form-label">产品名称</label>
+        <input type="text" class="form-control" id="search_product" placeholder="请输入产品名称">
+    </div>
+    <div class="col-md-2">
+        <label class="form-label">公司名称</label>
+        <select class="form-select" id="search_company">
+            <option value="">全部公司</option>
+        </select>
+    </div>
+    <div class="col-md-2">
+        <label class="form-label">开始时间</label>
+        <input type="month" class="form-control" id="search_date_start">
+    </div>
+    <div class="col-md-2">
+        <label class="form-label">结束时间</label>
+        <input type="month" class="form-control" id="search_date_end">
+    </div>
+    <div class="col-md-1">
+        <label class="form-label">最低价</label>
+        <input type="number" class="form-control" id="search_price_min" placeholder="0" min="0" step="0.01">
+    </div>
+    <div class="col-md-1">
+        <label class="form-label">最高价</label>
+        <input type="number" class="form-control" id="search_price_max" placeholder="999" min="0" step="0.01">
+    </div>
+    <div class="col-md-1">
+        <label class="form-label">&nbsp;</label>
+        <div class="d-grid gap-2 d-md-block">
+            <button type="button" class="btn btn-primary" onclick="performSearch()">
+                <i class="fas fa-search"></i> 搜索
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="resetSearch()">
+                <i class="fas fa-undo"></i> 重置
+            </button>
+        </div>
+    </div>
 </div>
+        </div>
+    </div>
 
-<div class="table-responsive">
-<table class="table table-sm" id="quotes-table">
-  <thead><tr><th style="width:6%">ID</th><th>产品</th><th>公司</th><th style="width:10%">价格</th><th style="width:8%">数量</th><th style="width:12%">日期</th><th style="width:12%">操作</th></tr></thead>
-  <tbody>
-    {% for q in quotes %}
-    <tr>
-      <td>{{ q.id }}</td>
-      <td>{{ q.product }}</td>
-      <td>{{ q.company }}</td>
-      <td>{{ q.price }}</td>
-      <td>{{ q.qty }}</td>
-      <td>{{ q.bid_date }}</td>
-      <td>
-        <button class="btn btn-sm btn-outline-primary btn-edit" data-id="{{ q.id }}">编辑</button>
-        <button class="btn btn-sm btn-outline-danger btn-delete" data-id="{{ q.id }}">删除</button>
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+    <!-- 结果表格区域 -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">报价数据</h5>
+            <div id="search-status" class="text-muted">
+                <i class="fas fa-spinner fa-spin d-none" id="loading-icon"></i>
+                <span id="status-text">就绪</span>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0" id="quotes-table">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width:6%">ID</th>
+                            <th>产品名称</th>
+                            <th>公司名称</th>
+                            <th style="width:10%">价格</th>
+                            <th style="width:8%">数量</th>
+                            <th style="width:12%">中标日期</th>
+                            <th style="width:12%">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="quotes-tbody">
+                        <tr>
+                            <td colspan="7" class="text-center text-muted py-4">
+                                点击搜索按钮开始查询数据
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- 分页区域 -->
+        <div class="card-footer">
+            <div class="d-flex justify-content-between align-items-center">
+                <div id="pagination-info">
+                    共找到 <strong>0</strong> 条记录，第 <strong>0/0</strong> 页
+                </div>
+                <div>
+                    <label class="form-label me-2">每页显示：</label>
+                    <select class="form-select d-inline-block w-auto" id="page-size-select" onchange="changePageSize()">
+                        <option value="20">20条</option>
+                        <option value="50">50条</option>
+                        <option value="100">100条</option>
+                    </select>
+                </div>
+                <nav>
+                    <ul class="pagination mb-0" id="pagination-nav">
+                        <!-- 分页导航将通过JavaScript生成 -->
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-document.addEventListener('DOMContentLoaded', function(){
-  document.querySelectorAll('.btn-edit').forEach(btn=>{
-    btn.addEventListener('click', function(){ alert('编辑：' + this.dataset.id); });
-  });
-  document.querySelectorAll('.btn-delete').forEach(btn=>{
-    btn.addEventListener('click', function(){
-      const id = this.dataset.id;
-      if(!confirm('确认删除?')) return;
-      fetch('/api/smart_quotes/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})})
-        .then(r=>r.json()).then(d=>{ if(d.success) location.reload(); else alert('删除失败'); });
-    });
-  });
+// 全局变量
+let currentPage = 1;
+let pageSize = 20;
+let totalRecords = 0;
+let totalPages = 0;
+let searchParams = {};
+
+// 页面加载完成后初始化
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('页面加载完成，开始初始化');
+    
+    // 只加载搜索选项，不自动搜索
+    loadSearchOptions();
+    
+    // 显示提示信息
+    document.getElementById('status-text').textContent = '请点击搜索按钮查询数据';
 });
+
+// 初始化页面
+function initializePage() {
+    console.log('开始初始化页面');
+    loadSearchOptions();
+    // 默认加载第一页数据
+}
+
+// 加载搜索选项（公司和年份下拉框）
+function loadSearchOptions() {
+    console.log('开始初始化搜索选项');
+    
+    // 暂时先设置静态选项，避免API冲突
+    const companySelect = document.getElementById('search_company');
+    companySelect.innerHTML = '<option value="">全部公司</option><option value="华润医药">华润医药</option><option value="国药控股">国药控股</option><option value="上药集团">上药集团</option><option value="默认">默认</option>';
+    
+    document.getElementById('status-text').textContent = '就绪 - 请点击搜索按钮查询数据';
+    console.log('搜索选项初始化完成');
+}
+
+// 执行搜索
+async function performSearch(page = 1) {
+    console.log('开始执行搜索，页码:', page);
+    
+    // 显示加载状态
+    showLoading(true);
+
+// 收集搜索参数
+searchParams = {
+    product: document.getElementById('search_product').value.trim(),
+    company: document.getElementById('search_company').value,
+    // 修改时间参数
+    date_start: document.getElementById('search_date_start').value, // 2024-01 格式
+    date_end: document.getElementById('search_date_end').value,     // 2024-12 格式
+    price_min: document.getElementById('search_price_min').value ? parseFloat(document.getElementById('search_price_min').value) : null,
+    price_max: document.getElementById('search_price_max').value ? parseFloat(document.getElementById('search_price_max').value) : null,
+    page: page,
+    page_size: pageSize
+};
+    
+    console.log('搜索参数:', searchParams);
+    
+    try {
+        console.log('发送请求到:', '/api/smart_quote/search');
+        
+        const response = await fetch('/api/smart_quote/search', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify(searchParams)
+        });
+        
+        console.log('响应状态码:', response.status);
+        console.log('响应状态:', response.ok);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('响应错误内容:', errorText);
+            throw new Error(`HTTP错误: ${response.status} ${response.statusText}`);
+        }
+        
+        const result = await response.json();
+        console.log('响应结果:', result);
+        
+        if (result.success) {
+            console.log('搜索成功，数据条数:', result.data.length);
+            displaySearchResults(result.data);
+            updatePagination(result.pagination);
+            currentPage = result.pagination.current_page;
+            totalRecords = result.pagination.total_records;
+            totalPages = result.pagination.total_pages;
+        } else {
+            console.error('搜索失败:', result.error);
+            alert('搜索失败：' + (result.error || '未知错误'));
+        }
+    } catch (error) {
+        console.error('搜索请求异常:', error);
+        console.error('错误详情:', error.message);
+        alert('搜索请求失败：' + error.message);
+        
+        // 显示友好的错误信息
+        const tbody = document.getElementById('quotes-tbody');
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" class="text-center text-danger py-4">
+                    <i class="fas fa-exclamation-triangle"></i> 搜索失败：${error.message}
+                </td>
+            </tr>
+        `;
+    } finally {
+        showLoading(false);
+    }
+}
+
+// 显示搜索结果
+function displaySearchResults(data) {
+    const tbody = document.getElementById('quotes-tbody');
+    
+    if (data.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" class="text-center text-muted py-4">
+                    <i class="fas fa-search"></i> 未找到匹配的数据
+                </td>
+            </tr>
+        `;
+        return;
+    }
+    
+    tbody.innerHTML = data.map(quote => `
+        <tr>
+            <td>${quote.id}</td>
+            <td>${quote.product || '-'}</td>
+            <td>${quote.company || '-'}</td>
+            <td class="text-end">${quote.price ? parseFloat(quote.price).toFixed(2) : '-'}</td>
+            <td class="text-end">${quote.qty || '-'}</td>
+            <td>${quote.bid_date || '-'}</td>
+            <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="editQuote(${quote.id})">
+                    <i class="fas fa-edit"></i> 编辑
+                </button>
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteQuote(${quote.id})">
+                    <i class="fas fa-trash"></i> 删除
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+// 更新分页信息
+function updatePagination(pagination) {
+    // 更新分页信息文本
+    document.getElementById('pagination-info').innerHTML = 
+        `共找到 <strong>${pagination.total_records}</strong> 条记录，第 <strong>${pagination.current_page}/${pagination.total_pages}</strong> 页`;
+    
+    // 生成分页导航
+    generatePaginationNav(pagination);
+}
+
+// 生成分页导航
+function generatePaginationNav(pagination) {
+    const nav = document.getElementById('pagination-nav');
+    
+    if (pagination.total_pages <= 1) {
+        nav.innerHTML = '';
+        return;
+    }
+    
+    let html = '';
+    
+    // 上一页
+    const prevDisabled = pagination.current_page <= 1 ? 'disabled' : '';
+    html += `
+        <li class="page-item ${prevDisabled}">
+            <a class="page-link" href="#" onclick="changePage(${pagination.current_page - 1})">上一页</a>
+        </li>
+    `;
+    
+    // 页码
+    const startPage = Math.max(1, pagination.current_page - 2);
+    const endPage = Math.min(pagination.total_pages, pagination.current_page + 2);
+    
+    for (let i = startPage; i <= endPage; i++) {
+        const active = i === pagination.current_page ? 'active' : '';
+        html += `
+            <li class="page-item ${active}">
+                <a class="page-link" href="#" onclick="changePage(${i})">${i}</a>
+            </li>
+        `;
+    }
+    
+    // 下一页
+    const nextDisabled = pagination.current_page >= pagination.total_pages ? 'disabled' : '';
+    html += `
+        <li class="page-item ${nextDisabled}">
+            <a class="page-link" href="#" onclick="changePage(${pagination.current_page + 1})">下一页</a>
+        </li>
+    `;
+    
+    nav.innerHTML = html;
+}
+
+// 切换页码
+function changePage(page) {
+    if (page < 1 || page > totalPages) return;
+    performSearch(page);
+}
+
+// 改变每页显示条数
+function changePageSize() {
+    pageSize = parseInt(document.getElementById('page-size-select').value);
+    performSearch(1); // 重置到第一页
+}
+
+// 重置搜索
+function resetSearch() {
+    document.getElementById('search_product').value = '';
+    document.getElementById('search_company').value = '';
+    document.getElementById('search_date_start').value = '';
+    document.getElementById('search_date_end').value = '';
+    document.getElementById('search_price_min').value = '';
+    document.getElementById('search_price_max').value = '';
+    performSearch(1);
+}
+
+// 显示/隐藏加载状态
+function showLoading(show) {
+    const loadingIcon = document.getElementById('loading-icon');
+    const statusText = document.getElementById('status-text');
+    
+    if (show) {
+        loadingIcon.classList.remove('d-none');
+        statusText.textContent = '搜索中...';
+    } else {
+        loadingIcon.classList.add('d-none');
+        statusText.textContent = '就绪';
+    }
+}
+
+// 编辑报价
+function editQuote(id) {
+    // TODO: 实现编辑功能
+    alert('编辑功能：ID ' + id);
+}
+
+// 删除报价
+async function deleteQuote(id) {
+    if (!confirm('确认删除这条报价记录吗？')) return;
+    
+    try {
+        const response = await fetch('/api/smart_quotes/delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id: id})
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert('删除成功');
+            performSearch(currentPage); // 刷新当前页
+        } else {
+            alert('删除失败：' + (result.error || '未知错误'));
+        }
+    } catch (error) {
+        console.error('删除请求失败：', error);
+        alert('删除请求失败，请检查网络连接');
+    }
+}
 </script>
 {% endblock %}
-</body>
-</html>
