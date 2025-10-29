@@ -1036,6 +1036,82 @@ def ensure_tables():
         create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (order_id) REFERENCES sales_orders(id) ON DELETE CASCADE
     )''')
+
+        # ========== 新增：库存管理表 ==========
+    
+    # 库存主表
+    cur.execute('''CREATE TABLE IF NOT EXISTS inventory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_name VARCHAR(100) NOT NULL,
+        category VARCHAR(50),
+        specification VARCHAR(100),
+        unit VARCHAR(20) DEFAULT '件',
+        current_stock DECIMAL(10,2) DEFAULT 0,
+        safe_stock DECIMAL(10,2) DEFAULT 0,
+        warehouse_location VARCHAR(50),
+        remarks TEXT,
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        update_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+    
+    # 入库记录表
+    cur.execute('''CREATE TABLE IF NOT EXISTS inbound_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        record_code VARCHAR(20) UNIQUE NOT NULL,
+        inbound_type VARCHAR(20) DEFAULT '采购入库',
+        product_name VARCHAR(100) NOT NULL,
+        category VARCHAR(50),
+        specification VARCHAR(100),
+        quantity DECIMAL(10,2) NOT NULL,
+        unit VARCHAR(20),
+        purchase_order_code VARCHAR(20),
+        supplier_name VARCHAR(100),
+        inbound_date DATE NOT NULL,
+        operator VARCHAR(50),
+        remarks TEXT,
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+    
+    # 出库记录表
+    cur.execute('''CREATE TABLE IF NOT EXISTS outbound_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        record_code VARCHAR(20) UNIQUE NOT NULL,
+        outbound_type VARCHAR(20) DEFAULT '销售出库',
+        product_name VARCHAR(100) NOT NULL,
+        category VARCHAR(50),
+        specification VARCHAR(100),
+        quantity DECIMAL(10,2) NOT NULL,
+        unit VARCHAR(20),
+        sales_order_code VARCHAR(20),
+        customer_name VARCHAR(100),
+        outbound_date DATE NOT NULL,
+        operator VARCHAR(50),
+        remarks TEXT,
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+    
+    # 分拣标签表（修复字段）
+    cur.execute('''CREATE TABLE IF NOT EXISTS picking_labels (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        label_code VARCHAR(20) UNIQUE NOT NULL,
+        order_id INTEGER NOT NULL,
+        order_code VARCHAR(20),
+        customer_name VARCHAR(100),
+        product_name VARCHAR(100) NOT NULL,
+        category VARCHAR(50),
+        specification VARCHAR(50),
+        quantity DECIMAL(10,2) NOT NULL,
+        unit VARCHAR(20) DEFAULT '件',
+        delivery_date DATE,
+        label_status VARCHAR(20) DEFAULT '待打印',
+        print_count INTEGER DEFAULT 0,
+        remarks TEXT,
+        create_user VARCHAR(50),
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (order_id) REFERENCES sales_orders(id) ON DELETE CASCADE
+    )''')
+    
+    conn.commit()
     
     # 创建索引
     try:
@@ -1266,15 +1342,15 @@ def get_suppliers():
         conn.close()
         
         return jsonify({
-            'success': True,
-            'data': {
-                'items': items,
-                'total': total,
-                'page': page,
-                'page_size': page_size,
-                'total_pages': (total + page_size - 1) // page_size
-            }
-        })
+        'success': True,
+        'data': items,
+        'total': total,
+        'pagination': {
+            'page': page,
+            'page_size': page_size,
+            'total_pages': (total + page_size - 1) // page_size
+        }
+    })
         
     except Exception as e:
         logger.error(f"获取供应商列表失败: {str(e)}")
@@ -1581,15 +1657,15 @@ def get_sales_orders():
         conn.close()
         
         return jsonify({
-            'success': True,
-            'data': {
-                'items': items,
-                'total': total,
-                'page': page,
-                'page_size': page_size,
-                'total_pages': (total + page_size - 1) // page_size
-            }
-        })
+        'success': True,
+        'data': items,
+        'total': total,
+        'pagination': {
+            'page': page,
+            'page_size': page_size,
+            'total_pages': (total + page_size - 1) // page_size
+        }
+    })
         
     except Exception as e:
         logger.error(f"获取销售订单列表失败: {str(e)}")
@@ -2043,15 +2119,15 @@ def get_purchase_orders():
         conn.close()
         
         return jsonify({
-            'success': True,
-            'data': {
-                'items': items,
-                'total': total,
-                'page': page,
-                'page_size': page_size,
-                'total_pages': (total + page_size - 1) // page_size
-            }
-        })
+        'success': True,
+        'data': items,
+        'total': total,
+        'pagination': {
+            'page': page,
+            'page_size': page_size,
+            'total_pages': (total + page_size - 1) // page_size
+        }
+    })
         
     except Exception as e:
         logger.error(f"获取采购订单失败: {str(e)}")
@@ -4005,16 +4081,17 @@ def get_customers():
         
         conn.close()
         
+           
         return jsonify({
-            'success': True,
-            'data': {
-                'items': items,
-                'total': total,
-                'page': page,
-                'page_size': page_size,
-                'total_pages': (total + page_size - 1) // page_size
-            }
-        })
+        'success': True,
+        'data': items,              # 直接返回数组
+        'total': total,             # 移到外层
+        'pagination': {             # 可选：分页信息
+            'page': page,
+            'page_size': page_size,
+            'total_pages': (total + page_size - 1) // page_size
+        }
+    })
         
     except Exception as e:
         logger.error(f"获取客户列表失败: {str(e)}")
@@ -4344,15 +4421,15 @@ def get_picking_labels():
         conn.close()
         
         return jsonify({
-            'success': True,
-            'data': {
-                'items': items,
-                'total': total,
-                'page': page,
-                'page_size': page_size,
-                'total_pages': (total + page_size - 1) // page_size
-            }
-        })
+        'success': True,
+        'data': items,
+        'total': total,
+        'pagination': {
+            'page': page,
+            'page_size': page_size,
+            'total_pages': (total + page_size - 1) // page_size
+        }
+    })
         
     except Exception as e:
         logger.error(f"获取标签列表失败: {str(e)}")
@@ -4615,15 +4692,15 @@ def get_inventory():
         conn.close()
         
         return jsonify({
-            'success': True,
-            'data': {
-                'items': items,
-                'total': total,
-                'page': page,
-                'page_size': page_size,
-                'total_pages': (total + page_size - 1) // page_size
-            }
-        })
+        'success': True,
+        'data': items,
+        'total': total,
+        'pagination': {
+            'page': page,
+            'page_size': page_size,
+            'total_pages': (total + page_size - 1) // page_size
+        }
+    })
         
     except Exception as e:
         logger.error(f"获取库存列表失败: {str(e)}")
