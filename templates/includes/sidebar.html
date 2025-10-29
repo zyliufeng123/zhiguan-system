@@ -1,0 +1,37 @@
+<div class="col-md-2">
+    <div class="card">
+        <div class="list-group list-group-flush">
+            <a href="/dashboard" class="list-group-item list-group-item-action {% if request.path == '/dashboard' %}active{% endif %}">
+                <i class="bi bi-speedometer2"></i> 首页
+            </a>
+            
+            <a href="/customers" class="list-group-item list-group-item-action {% if request.path == '/customers' %}active{% endif %}">
+                <i class="bi bi-people"></i> 客户管理
+            </a>
+            
+            <a href="/suppliers" class="list-group-item list-group-item-action {% if request.path == '/suppliers' %}active{% endif %}">
+                <i class="bi bi-building"></i> 供应商管理
+            </a>
+            
+            <a href="/sales_orders" class="list-group-item list-group-item-action {% if request.path == '/sales_orders' %}active{% endif %}">
+                <i class="bi bi-cart-check"></i> 销售订单
+            </a>
+            
+            <a href="/purchase_orders" class="list-group-item list-group-item-action {% if request.path == '/purchase_orders' %}active{% endif %}">
+                <i class="bi bi-bag-check"></i> 采购订单
+            </a>
+            
+            <a href="/smart_quote" class="list-group-item list-group-item-action {% if request.path == '/smart_quote' %}active{% endif %}">
+                <i class="bi bi-calculator"></i> 智能报价
+            </a>
+            
+            <a href="/calculation_analysis" class="list-group-item list-group-item-action {% if request.path == '/calculation_analysis' %}active{% endif %}">
+                <i class="bi bi-graph-up"></i> 计算分析
+            </a>
+            
+            <a href="/settings" class="list-group-item list-group-item-action {% if request.path == '/settings' %}active{% endif %}">
+                <i class="bi bi-gear"></i> 系统设置
+            </a>
+        </div>
+    </div>
+</div>

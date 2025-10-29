@@ -206,11 +206,11 @@ def to_bid_month(s: str, global_month: str = None) -> str:
 # ========== 路由：登录/登出 ==========
 @app.route('/')
 def index():
-    # 渲染现有的 dashboard 模板（若不存在可改为其他）
-    try:
-        return render_template('dashboard.html')
-    except Exception:
-        return "Dashboard 模板不存在或渲染出错", 500
+    """首页跳转到登录页或仪表盘"""
+    if 'user' in session:
+        return redirect(url_for('dashboard'))
+    else:
+        return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -227,7 +227,6 @@ def logout():
     flash('已登出')
     return redirect(url_for('login'))
 
-# 添加这个缺失的dashboard路由
 @app.route('/dashboard')
 @login_required
 def dashboard():
@@ -235,21 +234,56 @@ def dashboard():
         conn = get_db()
         cur = conn.cursor()
         
-        # 获取基础统计数据
+        # 获取各模块统计数据
+        stats = {}
+        
+        # 智能报价统计
         try:
-            quote_count = cur.execute('SELECT COUNT(*) FROM quotes').fetchone()[0]
+            cur.execute('SELECT COUNT(*) FROM quotes')
+            stats['quotes_count'] = cur.fetchone()[0]
         except:
-            quote_count = 0
-            
+            stats['quotes_count'] = 0
+        
+        # 客户统计
         try:
-            order_count = cur.execute('SELECT COUNT(*) FROM orders').fetchone()[0]
+            cur.execute('SELECT COUNT(*) FROM customers')
+            stats['customers_count'] = cur.fetchone()[0]
         except:
-            order_count = 0
-            
+            stats['customers_count'] = 0
+        
+        # 供应商统计
+        try:
+            cur.execute('SELECT COUNT(*) FROM suppliers')
+            stats['suppliers_count'] = cur.fetchone()[0]
+        except:
+            stats['suppliers_count'] = 0
+        
+        # 销售订单统计
+        try:
+            cur.execute('SELECT COUNT(*) FROM sales_orders')
+            stats['sales_orders_count'] = cur.fetchone()[0]
+        except:
+            stats['sales_orders_count'] = 0
+        
+        # 采购订单统计
+        try:
+            cur.execute('SELECT COUNT(*) FROM purchase_orders')
+            stats['purchase_orders_count'] = cur.fetchone()[0]
+        except:
+            stats['purchase_orders_count'] = 0
+        
+        # 旧订单统计（兼容）
+        try:
+            cur.execute('SELECT COUNT(*) FROM orders')
+            stats['orders_count'] = cur.fetchone()[0]
+        except:
+            stats['orders_count'] = 0
+        
         conn.close()
         
-        return render_template('dashboard.html', quotes=quote_count, orders=order_count)
+        return render_template('dashboard.html', stats=stats)
     except Exception as e:
+        logger.exception("Dashboard错误")
         return f"Dashboard页面: {str(e)}", 500
 
 
@@ -1052,6 +1086,140 @@ def ensure_tables():
     cur.execute('''CREATE TABLE IF NOT EXISTS import_errors
                     (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT, row_no INTEGER, raw TEXT, error_msg TEXT)''')
 
+    # ========== 订单系统数据库表 ==========
+    
+    # 1. 客户表
+    cur.execute('''CREATE TABLE IF NOT EXISTS customers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_code VARCHAR(20) UNIQUE NOT NULL,
+        customer_name VARCHAR(100) NOT NULL,
+        contact_person VARCHAR(50),
+        contact_phone VARCHAR(20),
+        address TEXT,
+        remarks TEXT,
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        update_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+    
+    # 2. 供应商表
+    cur.execute('''CREATE TABLE IF NOT EXISTS suppliers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        supplier_code VARCHAR(20) UNIQUE NOT NULL,
+        supplier_name VARCHAR(100) NOT NULL,
+        contact_person VARCHAR(50),
+        contact_phone VARCHAR(20),
+        address TEXT,
+        remarks TEXT,
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        update_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+    
+    # 3. 销售订单表
+    cur.execute('''CREATE TABLE IF NOT EXISTS sales_orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_code VARCHAR(20) UNIQUE NOT NULL,
+        customer_id INTEGER NOT NULL,
+        customer_name VARCHAR(100) NOT NULL,
+        order_date DATE NOT NULL,
+        delivery_date DATE,
+        total_amount DECIMAL(10,2) DEFAULT 0,
+        status VARCHAR(20) DEFAULT '待确认',
+        remarks TEXT,
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        update_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        create_user VARCHAR(50),
+        FOREIGN KEY (customer_id) REFERENCES customers(id)
+    )''')
+    
+    # 4. 销售订单明细表
+    cur.execute('''CREATE TABLE IF NOT EXISTS sales_order_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        smart_quote_id INTEGER,
+        product_name VARCHAR(100) NOT NULL,
+        category VARCHAR(50),
+        specification VARCHAR(50),
+        unit VARCHAR(20) NOT NULL,
+        quantity DECIMAL(10,2) NOT NULL,
+        price DECIMAL(10,2) NOT NULL,
+        amount DECIMAL(10,2) NOT NULL,
+        remarks TEXT,
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (order_id) REFERENCES sales_orders(id) ON DELETE CASCADE,
+        FOREIGN KEY (smart_quote_id) REFERENCES quotes(id) ON DELETE SET NULL
+    )''')
+    
+    # 5. 采购订单表
+    cur.execute('''CREATE TABLE IF NOT EXISTS purchase_orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_code VARCHAR(20) UNIQUE NOT NULL,
+        supplier_id INTEGER NOT NULL,
+        supplier_name VARCHAR(100) NOT NULL,
+        order_date DATE NOT NULL,
+        expected_date DATE,
+        total_amount DECIMAL(10,2) DEFAULT 0,
+        status VARCHAR(20) DEFAULT '待确认',
+        remarks TEXT,
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        update_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        create_user VARCHAR(50),
+        FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
+    )''')
+    
+    # 6. 采购订单明细表
+    cur.execute('''CREATE TABLE IF NOT EXISTS purchase_order_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        product_name VARCHAR(100) NOT NULL,
+        category VARCHAR(50),
+        specification VARCHAR(50),
+        unit VARCHAR(20) NOT NULL,
+        quantity DECIMAL(10,2) NOT NULL,
+        price DECIMAL(10,2) NOT NULL,
+        amount DECIMAL(10,2) NOT NULL,
+        remarks TEXT,
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE
+    )''')
+    
+    # 7. 分拣标签表
+    cur.execute('''CREATE TABLE IF NOT EXISTS picking_labels (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        label_code VARCHAR(20) UNIQUE NOT NULL,
+        order_id INTEGER NOT NULL,
+        order_code VARCHAR(20),
+        customer_name VARCHAR(100),
+        product_name VARCHAR(100) NOT NULL,
+        category VARCHAR(50),
+        specification VARCHAR(50),
+        unit VARCHAR(20),
+        quantity DECIMAL(10,2) NOT NULL,
+        remarks TEXT,
+        status VARCHAR(20) DEFAULT '待分拣',
+        picker VARCHAR(50),
+        pick_time DATETIME,
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (order_id) REFERENCES sales_orders(id) ON DELETE CASCADE
+    )''')
+    
+    # 创建索引
+    try:
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(customer_name)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_customers_code ON customers(customer_code)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_suppliers_name ON suppliers(supplier_name)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_suppliers_code ON suppliers(supplier_code)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_sales_orders_code ON sales_orders(order_code)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_sales_orders_date ON sales_orders(order_date)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_sales_orders_status ON sales_orders(status)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_sales_orders_customer ON sales_orders(customer_id)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_purchase_orders_code ON purchase_orders(order_code)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_purchase_orders_date ON purchase_orders(order_date)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_purchase_orders_status ON purchase_orders(status)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_picking_labels_order ON picking_labels(order_id)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_picking_labels_status ON picking_labels(status)')
+    except Exception as e:
+        logger.warning(f"创建索引时出现警告: {str(e)}")
+
     conn.commit()
     # 兼容：若旧的 products 表缺少 normalized_name 列，尝试添加（SQLite 在重复添加时会抛错，捕获忽略）
     try:
@@ -1066,7 +1234,929 @@ def ensure_tables():
 # 确保在模块加载时初始化表（方便直接用 python app.py 启动）
 ensure_tables()
 
+# 在 ensure_tables() 函数之后添加（约第 1245 行）
+
+def generate_customer_code():
+    """生成客户编号 KH20250127001"""
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        today = datetime.now().strftime('%Y%m%d')
+        prefix = f"KH{today}"
+        
+        cur.execute('''
+            SELECT customer_code FROM customers 
+            WHERE customer_code LIKE ? 
+            ORDER BY customer_code DESC LIMIT 1
+        ''', (f'{prefix}%',))
+        
+        result = cur.fetchone()
+        if result:
+            last_code = result[0]
+            last_num = int(last_code[-3:])
+            new_num = last_num + 1
+        else:
+            new_num = 1
+        
+        return f"{prefix}{new_num:03d}"
+    finally:
+        conn.close()
+
+
+def generate_supplier_code():
+    """生成供应商编号 GYS20250127001"""
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        today = datetime.now().strftime('%Y%m%d')
+        prefix = f"GYS{today}"
+        
+        cur.execute('''
+            SELECT supplier_code FROM suppliers 
+            WHERE supplier_code LIKE ? 
+            ORDER BY supplier_code DESC LIMIT 1
+        ''', (f'{prefix}%',))
+        
+        result = cur.fetchone()
+        if result:
+            last_code = result[0]
+            last_num = int(last_code[-3:])
+            new_num = last_num + 1
+        else:
+            new_num = 1
+        
+        return f"{prefix}{new_num:03d}"
+    finally:
+        conn.close()
+
+
+def generate_sales_order_code():
+    """生成销售订单编号 XS20250127001"""
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        today = datetime.now().strftime('%Y%m%d')
+        prefix = f"XS{today}"
+        
+        cur.execute('''
+            SELECT order_code FROM sales_orders 
+            WHERE order_code LIKE ? 
+            ORDER BY order_code DESC LIMIT 1
+        ''', (f'{prefix}%',))
+        
+        result = cur.fetchone()
+        if result:
+            last_code = result[0]
+            last_num = int(last_code[-3:])
+            new_num = last_num + 1
+        else:
+            new_num = 1
+        
+        return f"{prefix}{new_num:03d}"
+    finally:
+        conn.close()
+
+
+def generate_purchase_order_code():
+    """生成采购订单编号 CG20250127001"""
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        today = datetime.now().strftime('%Y%m%d')
+        prefix = f"CG{today}"
+        
+        cur.execute('''
+            SELECT order_code FROM purchase_orders 
+            WHERE order_code LIKE ? 
+            ORDER BY order_code DESC LIMIT 1
+        ''', (f'{prefix}%',))
+        
+        result = cur.fetchone()
+        if result:
+            last_code = result[0]
+            last_num = int(last_code[-3:])
+            new_num = last_num + 1
+        else:
+            new_num = 1
+        
+        return f"{prefix}{new_num:03d}"
+    finally:
+        conn.close()
+
+
+def generate_picking_label_code():
+    """生成分拣标签编号 FJ20250127-001"""
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        today = datetime.now().strftime('%Y%m%d')
+        prefix = f"FJ{today}"
+        
+        cur.execute('''
+            SELECT label_code FROM picking_labels 
+            WHERE label_code LIKE ? 
+            ORDER BY label_code DESC LIMIT 1
+        ''', (f'{prefix}%',))
+        
+        result = cur.fetchone()
+        if result:
+            last_code = result[0]
+            last_num = int(last_code.split('-')[-1])
+            new_num = last_num + 1
+        else:
+            new_num = 1
+        
+        return f"{prefix}-{new_num:03d}"
+    finally:
+        conn.close()
+
 # --- API 路由 ---
+
+# 在客户管理 API 之后添加（约第 1480 行之后）
+
+# ========== 供应商管理 API ==========
+
+@app.route('/suppliers')
+@login_required
+def suppliers_page():
+    """供应商管理页面"""
+    return render_template('suppliers.html')
+
+
+@app.route('/api/suppliers', methods=['GET'])
+@login_required
+def get_suppliers():
+    """获取供应商列表（分页、搜索）"""
+    try:
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 15))
+        search_name = request.args.get('name', '').strip()
+        search_phone = request.args.get('phone', '').strip()
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 构建查询条件
+        where_conditions = []
+        params = []
+        
+        if search_name:
+            where_conditions.append("supplier_name LIKE ?")
+            params.append(f'%{search_name}%')
+        
+        if search_phone:
+            where_conditions.append("contact_phone LIKE ?")
+            params.append(f'%{search_phone}%')
+        
+        where_clause = ' AND '.join(where_conditions) if where_conditions else '1=1'
+        
+        # 查询总数
+        cur.execute(f"SELECT COUNT(*) FROM suppliers WHERE {where_clause}", params)
+        total = cur.fetchone()[0]
+        
+        # 查询数据
+        offset = (page - 1) * page_size
+        cur.execute(f'''
+            SELECT id, supplier_code, supplier_name, contact_person, 
+                   contact_phone, address, remarks, create_time, update_time
+            FROM suppliers 
+            WHERE {where_clause}
+            ORDER BY create_time DESC
+            LIMIT ? OFFSET ?
+        ''', params + [page_size, offset])
+        
+        columns = [desc[0] for desc in cur.description]
+        items = [dict(zip(columns, row)) for row in cur.fetchall()]
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'items': items,
+                'total': total,
+                'page': page,
+                'page_size': page_size,
+                'total_pages': (total + page_size - 1) // page_size
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"获取供应商列表失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/suppliers/generate_code', methods=['GET'])
+@login_required
+def generate_supplier_code_api():
+    """生成新的供应商编号"""
+    try:
+        code = generate_supplier_code()
+        return jsonify({'success': True, 'code': code})
+    except Exception as e:
+        logger.error(f"生成供应商编号失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/suppliers/<int:supplier_id>', methods=['GET'])
+@login_required
+def get_supplier(supplier_id):
+    """获取单个供应商详情"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        cur.execute('''
+            SELECT id, supplier_code, supplier_name, contact_person,
+                   contact_phone, address, remarks, create_time, update_time
+            FROM suppliers WHERE id = ?
+        ''', (supplier_id,))
+        
+        row = cur.fetchone()
+        conn.close()
+        
+        if not row:
+            return jsonify({'success': False, 'message': '供应商不存在'}), 404
+        
+        columns = [desc[0] for desc in cur.description]
+        supplier = dict(zip(columns, row))
+        
+        return jsonify({'success': True, 'data': supplier})
+        
+    except Exception as e:
+        logger.error(f"获取供应商详情失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/suppliers', methods=['POST'])
+@login_required
+def add_supplier():
+    """添加供应商"""
+    try:
+        data = request.get_json()
+        
+        # 验证必填字段
+        if not data.get('supplier_name'):
+            return jsonify({'success': False, 'message': '供应商名称不能为空'}), 400
+        
+        if not data.get('supplier_code'):
+            data['supplier_code'] = generate_supplier_code()
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 检查编号是否重复
+        cur.execute('SELECT id FROM suppliers WHERE supplier_code = ?', (data['supplier_code'],))
+        if cur.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'message': '供应商编号已存在'}), 400
+        
+        # 插入数据
+        cur.execute('''
+            INSERT INTO suppliers (supplier_code, supplier_name, contact_person,
+                                 contact_phone, address, remarks)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (
+            data['supplier_code'],
+            data['supplier_name'],
+            data.get('contact_person'),
+            data.get('contact_phone'),
+            data.get('address'),
+            data.get('remarks')
+        ))
+        
+        conn.commit()
+        supplier_id = cur.lastrowid
+        conn.close()
+        
+        return jsonify({'success': True, 'message': '添加成功', 'id': supplier_id})
+        
+    except Exception as e:
+        logger.error(f"添加供应商失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/suppliers/<int:supplier_id>', methods=['PUT'])
+@login_required
+def update_supplier(supplier_id):
+    """更新供应商"""
+    try:
+        data = request.get_json()
+        
+        if not data.get('supplier_name'):
+            return jsonify({'success': False, 'message': '供应商名称不能为空'}), 400
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 检查供应商是否存在
+        cur.execute('SELECT id FROM suppliers WHERE id = ?', (supplier_id,))
+        if not cur.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'message': '供应商不存在'}), 404
+        
+        # 更新数据
+        cur.execute('''
+            UPDATE suppliers 
+            SET supplier_name = ?, contact_person = ?, contact_phone = ?,
+                address = ?, remarks = ?, update_time = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (
+            data['supplier_name'],
+            data.get('contact_person'),
+            data.get('contact_phone'),
+            data.get('address'),
+            data.get('remarks'),
+            supplier_id
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': '更新成功'})
+        
+    except Exception as e:
+        logger.error(f"更新供应商失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/suppliers/<int:supplier_id>', methods=['DELETE'])
+@login_required
+def delete_supplier(supplier_id):
+    """删除供应商"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 检查是否有关联订单
+        cur.execute('SELECT COUNT(*) FROM purchase_orders WHERE supplier_id = ?', (supplier_id,))
+        order_count = cur.fetchone()[0]
+        
+        if order_count > 0:
+            conn.close()
+            return jsonify({
+                'success': False, 
+                'message': f'该供应商有 {order_count} 个关联采购订单，无法删除'
+            }), 400
+        
+        # 删除供应商
+        cur.execute('DELETE FROM suppliers WHERE id = ?', (supplier_id,))
+        
+        if cur.rowcount == 0:
+            conn.close()
+            return jsonify({'success': False, 'message': '供应商不存在'}), 404
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': '删除成功'})
+        
+    except Exception as e:
+        logger.error(f"删除供应商失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/suppliers/export', methods=['GET'])
+@login_required
+def export_suppliers():
+    """导出供应商数据到Excel"""
+    try:
+        import io
+        from datetime import datetime
+        
+        search_name = request.args.get('name', '').strip()
+        search_phone = request.args.get('phone', '').strip()
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 构建查询条件
+        where_conditions = []
+        params = []
+        
+        if search_name:
+            where_conditions.append("supplier_name LIKE ?")
+            params.append(f'%{search_name}%')
+        
+        if search_phone:
+            where_conditions.append("contact_phone LIKE ?")
+            params.append(f'%{search_phone}%')
+        
+        where_clause = ' AND '.join(where_conditions) if where_conditions else '1=1'
+        
+        # 查询所有数据
+        cur.execute(f'''
+            SELECT supplier_code, supplier_name, contact_person, contact_phone,
+                   address, remarks, create_time
+            FROM suppliers 
+            WHERE {where_clause}
+            ORDER BY create_time DESC
+        ''', params)
+        
+        rows = cur.fetchall()
+        conn.close()
+        
+        # 创建Excel
+        import pandas as pd
+        df = pd.DataFrame(rows, columns=[
+            '供应商编号', '供应商名称', '联系人', '联系电话', '地址', '备注', '创建时间'
+        ])
+        
+        # 输出到内存
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='供应商列表')
+        
+        output.seek(0)
+        
+        # 生成文件名
+        filename = f'供应商列表_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+        
+        from flask import send_file
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        logger.error(f"导出供应商数据失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+# ========== 销售订单管理 API ==========
+
+@app.route('/sales_orders')
+@login_required
+def sales_orders_page():
+    """销售订单管理页面"""
+    return render_template('sales_orders.html')
+
+
+@app.route('/api/sales_orders', methods=['GET'])
+@login_required
+def get_sales_orders():
+    """获取销售订单列表（分页、搜索）"""
+    try:
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 15))
+        search_order_code = request.args.get('order_code', '').strip()
+        search_customer = request.args.get('customer', '').strip()
+        search_status = request.args.get('status', '').strip()
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 构建查询条件
+        where_conditions = []
+        params = []
+        
+        if search_order_code:
+            where_conditions.append("order_code LIKE ?")
+            params.append(f'%{search_order_code}%')
+        
+        if search_customer:
+            where_conditions.append("customer_name LIKE ?")
+            params.append(f'%{search_customer}%')
+        
+        if search_status:
+            where_conditions.append("status = ?")
+            params.append(search_status)
+        
+        where_clause = ' AND '.join(where_conditions) if where_conditions else '1=1'
+        
+        # 查询总数
+        cur.execute(f"SELECT COUNT(*) FROM sales_orders WHERE {where_clause}", params)
+        total = cur.fetchone()[0]
+        
+        # 查询数据
+        offset = (page - 1) * page_size
+        cur.execute(f'''
+            SELECT id, order_code, customer_id, customer_name, order_date, 
+                   delivery_date, total_amount, status, remarks, create_time
+            FROM sales_orders 
+            WHERE {where_clause}
+            ORDER BY create_time DESC
+            LIMIT ? OFFSET ?
+        ''', params + [page_size, offset])
+        
+        columns = [desc[0] for desc in cur.description]
+        items = [dict(zip(columns, row)) for row in cur.fetchall()]
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'items': items,
+                'total': total,
+                'page': page,
+                'page_size': page_size,
+                'total_pages': (total + page_size - 1) // page_size
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"获取销售订单列表失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/sales_orders/generate_code', methods=['GET'])
+@login_required
+def generate_sales_order_code_api():
+    """生成新的销售订单编号"""
+    try:
+        code = generate_sales_order_code()
+        return jsonify({'success': True, 'code': code})
+    except Exception as e:
+        logger.error(f"生成销售订单编号失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/sales_orders/<int:order_id>', methods=['GET'])
+@login_required
+def get_sales_order(order_id):
+    """获取单个销售订单详情（含明细）"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 查询订单主表
+        cur.execute('''
+            SELECT id, order_code, customer_id, customer_name, order_date,
+                   delivery_date, total_amount, status, remarks, create_time
+            FROM sales_orders WHERE id = ?
+        ''', (order_id,))
+        
+        row = cur.fetchone()
+        
+        if not row:
+            conn.close()
+            return jsonify({'success': False, 'message': '订单不存在'}), 404
+        
+        columns = [desc[0] for desc in cur.description]
+        order = dict(zip(columns, row))
+        
+        # 查询订单明细
+        cur.execute('''
+            SELECT id, product_name, category, specification, unit,
+                   quantity, price, amount, remarks
+            FROM sales_order_items
+            WHERE order_id = ?
+            ORDER BY id
+        ''', (order_id,))
+        
+        item_columns = [desc[0] for desc in cur.description]
+        items = [dict(zip(item_columns, row)) for row in cur.fetchall()]
+        
+        order['items'] = items
+        
+        conn.close()
+        
+        return jsonify({'success': True, 'data': order})
+        
+    except Exception as e:
+        logger.error(f"获取销售订单详情失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/sales_orders', methods=['POST'])
+@login_required
+def add_sales_order():
+    """添加销售订单"""
+    try:
+        data = request.get_json()
+        
+        # 验证必填字段
+        if not data.get('customer_id'):
+            return jsonify({'success': False, 'message': '请选择客户'}), 400
+        
+        if not data.get('order_date'):
+            return jsonify({'success': False, 'message': '请选择下单日期'}), 400
+        
+        items = data.get('items', [])
+        if not items:
+            return jsonify({'success': False, 'message': '请至少添加一条订单明细'}), 400
+        
+        # 生成订单编号
+        if not data.get('order_code'):
+            data['order_code'] = generate_sales_order_code()
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 获取客户名称
+        cur.execute('SELECT customer_name FROM customers WHERE id = ?', (data['customer_id'],))
+        customer = cur.fetchone()
+        if not customer:
+            conn.close()
+            return jsonify({'success': False, 'message': '客户不存在'}), 404
+        
+        customer_name = customer[0]
+        
+        # 计算订单总额
+        total_amount = sum(float(item['amount']) for item in items)
+        
+        # 插入订单主表
+        cur.execute('''
+            INSERT INTO sales_orders (
+                order_code, customer_id, customer_name, order_date,
+                delivery_date, total_amount, status, remarks, create_user
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            data['order_code'],
+            data['customer_id'],
+            customer_name,
+            data['order_date'],
+            data.get('delivery_date'),
+            total_amount,
+            data.get('order_status', '待确认'),
+            data.get('remarks'),
+            session.get('user', 'system')
+        ))
+        
+        order_id = cur.lastrowid
+        
+        # 插入订单明细
+        for item in items:
+            cur.execute('''
+                INSERT INTO sales_order_items (
+                    order_id, product_name, category, specification,
+                    unit, quantity, price, amount, remarks
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                order_id,
+                item['product_name'],
+                item.get('category'),
+                item.get('specification'),
+                item.get('unit', '件'),
+                item['quantity'],
+                item['price'],
+                item['amount'],
+                item.get('remarks')
+            ))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': '订单创建成功',
+            'order_id': order_id,
+            'order_code': data['order_code']
+        })
+        
+    except Exception as e:
+        logger.error(f"添加销售订单失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/sales_orders/<int:order_id>', methods=['PUT'])
+@login_required
+def update_sales_order(order_id):
+    """更新销售订单"""
+    try:
+        data = request.get_json()
+        
+        if not data.get('customer_id'):
+            return jsonify({'success': False, 'message': '请选择客户'}), 400
+        
+        if not data.get('order_date'):
+            return jsonify({'success': False, 'message': '请选择下单日期'}), 400
+        
+        items = data.get('items', [])
+        if not items:
+            return jsonify({'success': False, 'message': '请至少添加一条订单明细'}), 400
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 检查订单是否存在
+        cur.execute('SELECT id FROM sales_orders WHERE id = ?', (order_id,))
+        if not cur.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'message': '订单不存在'}), 404
+        
+        # 获取客户名称
+        cur.execute('SELECT customer_name FROM customers WHERE id = ?', (data['customer_id'],))
+        customer = cur.fetchone()
+        if not customer:
+            conn.close()
+            return jsonify({'success': False, 'message': '客户不存在'}), 404
+        
+        customer_name = customer[0]
+        
+        # 计算订单总额
+        total_amount = sum(float(item['amount']) for item in items)
+        
+        # 更新订单主表
+        cur.execute('''
+            UPDATE sales_orders 
+            SET customer_id = ?, customer_name = ?, order_date = ?,
+                delivery_date = ?, total_amount = ?, status = ?,
+                remarks = ?, update_time = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (
+            data['customer_id'],
+            customer_name,
+            data['order_date'],
+            data.get('delivery_date'),
+            total_amount,
+            data.get('order_status', '待确认'),
+            data.get('remarks'),
+            order_id
+        ))
+        
+        # 删除旧明细
+        cur.execute('DELETE FROM sales_order_items WHERE order_id = ?', (order_id,))
+        
+        # 插入新明细
+        for item in items:
+            cur.execute('''
+                INSERT INTO sales_order_items (
+                    order_id, product_name, category, specification,
+                    unit, quantity, price, amount, remarks
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                order_id,
+                item['product_name'],
+                item.get('category'),
+                item.get('specification'),
+                item.get('unit', '件'),
+                item['quantity'],
+                item['price'],
+                item['amount'],
+                item.get('remarks')
+            ))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': '订单更新成功'})
+        
+    except Exception as e:
+        logger.error(f"更新销售订单失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/sales_orders/<int:order_id>', methods=['DELETE'])
+@login_required
+def delete_sales_order(order_id):
+    """删除销售订单"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 检查订单状态
+        cur.execute('SELECT status FROM sales_orders WHERE id = ?', (order_id,))
+        order = cur.fetchone()
+        
+        if not order:
+            conn.close()
+            return jsonify({'success': False, 'message': '订单不存在'}), 404
+        
+        # 如果订单已发货或已完成，不允许删除
+        if order[0] in ['已发货', '已完成']:
+            conn.close()
+            return jsonify({
+                'success': False,
+                'message': f'订单状态为"{order[0]}"，不允许删除'
+            }), 400
+        
+        # 删除订单明细（CASCADE会自动删除）
+        cur.execute('DELETE FROM sales_order_items WHERE order_id = ?', (order_id,))
+        
+        # 删除订单
+        cur.execute('DELETE FROM sales_orders WHERE id = ?', (order_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': '删除成功'})
+        
+    except Exception as e:
+        logger.error(f"删除销售订单失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/sales_orders/export', methods=['GET'])
+@login_required
+def export_sales_orders():
+    """导出销售订单数据到Excel"""
+    try:
+        import io
+        from datetime import datetime
+        
+        search_order_code = request.args.get('order_code', '').strip()
+        search_customer = request.args.get('customer', '').strip()
+        search_status = request.args.get('status', '').strip()
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 构建查询条件
+        where_conditions = []
+        params = []
+        
+        if search_order_code:
+            where_conditions.append("o.order_code LIKE ?")
+            params.append(f'%{search_order_code}%')
+        
+        if search_customer:
+            where_conditions.append("o.customer_name LIKE ?")
+            params.append(f'%{search_customer}%')
+        
+        if search_status:
+            where_conditions.append("o.status = ?")
+            params.append(search_status)
+        
+        where_clause = ' AND '.join(where_conditions) if where_conditions else '1=1'
+        
+        # 查询订单及明细数据
+        cur.execute(f'''
+            SELECT 
+                o.order_code, o.customer_name, o.order_date, o.delivery_date,
+                o.status, i.product_name, i.category, i.specification,
+                i.quantity, i.unit, i.price, i.amount, o.remarks
+            FROM sales_orders o
+            LEFT JOIN sales_order_items i ON o.id = i.order_id
+            WHERE {where_clause}
+            ORDER BY o.create_time DESC, i.id
+        ''', params)
+        
+        rows = cur.fetchall()
+        conn.close()
+        
+        # 创建Excel
+        import pandas as pd
+        df = pd.DataFrame(rows, columns=[
+            '订单编号', '客户名称', '下单日期', '交货日期', '订单状态',
+            '商品名称', '类别', '规格', '数量', '单位', '单价', '金额', '备注'
+        ])
+        
+        # 输出到内存
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='销售订单')
+            
+            # 获取工作表并设置格式
+            worksheet = writer.sheets['销售订单']
+            
+            # 设置列宽
+            worksheet.column_dimensions['A'].width = 15  # 订单编号
+            worksheet.column_dimensions['B'].width = 20  # 客户名称
+            worksheet.column_dimensions['F'].width = 25  # 商品名称
+        
+        output.seek(0)
+        
+        # 生成文件名
+        filename = f'销售订单_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+        
+        from flask import send_file
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        logger.error(f"导出销售订单数据失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/sales_orders/<int:order_id>/print', methods=['GET'])
+@login_required
+def print_sales_order(order_id):
+    """生成销售订单打印页面"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 查询订单信息
+        cur.execute('''
+            SELECT o.*, c.contact_person, c.contact_phone, c.address
+            FROM sales_orders o
+            LEFT JOIN customers c ON o.customer_id = c.id
+            WHERE o.id = ?
+        ''', (order_id,))
+        
+        order = dict(cur.fetchone())
+        
+        # 查询订单明细
+        cur.execute('''
+            SELECT * FROM sales_order_items WHERE order_id = ? ORDER BY id
+        ''', (order_id,))
+        
+        items = [dict(row) for row in cur.fetchall()]
+        
+        conn.close()
+        
+        return render_template('print_sales_order.html', order=order, items=items)
+        
+    except Exception as e:
+        logger.error(f"生成打印页面失败: {str(e)}")
+        return f"生成打印页面失败: {str(e)}", 500
 
 @app.route('/api/products', methods=['GET'])
 def api_products():
@@ -2596,6 +3686,316 @@ def api_batch_export():
     except Exception as e:
         logger.exception("批量导出错误")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+# ========== 客户管理 API ==========
+
+@app.route('/customers')
+@login_required
+def customers_page():
+    """客户管理页面"""
+    return render_template('customers.html')
+
+
+@app.route('/api/customers', methods=['GET'])
+@login_required
+def get_customers():
+    """获取客户列表（分页、搜索）"""
+    try:
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 15))
+        search_name = request.args.get('name', '').strip()
+        search_phone = request.args.get('phone', '').strip()
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 构建查询条件
+        where_conditions = []
+        params = []
+        
+        if search_name:
+            where_conditions.append("customer_name LIKE ?")
+            params.append(f'%{search_name}%')
+        
+        if search_phone:
+            where_conditions.append("contact_phone LIKE ?")
+            params.append(f'%{search_phone}%')
+        
+        where_clause = ' AND '.join(where_conditions) if where_conditions else '1=1'
+        
+        # 查询总数
+        cur.execute(f"SELECT COUNT(*) FROM customers WHERE {where_clause}", params)
+        total = cur.fetchone()[0]
+        
+        # 查询数据
+        offset = (page - 1) * page_size
+        cur.execute(f'''
+            SELECT id, customer_code, customer_name, contact_person, 
+                   contact_phone, address, remarks, create_time, update_time
+            FROM customers 
+            WHERE {where_clause}
+            ORDER BY create_time DESC
+            LIMIT ? OFFSET ?
+        ''', params + [page_size, offset])
+        
+        columns = [desc[0] for desc in cur.description]
+        items = [dict(zip(columns, row)) for row in cur.fetchall()]
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'items': items,
+                'total': total,
+                'page': page,
+                'page_size': page_size,
+                'total_pages': (total + page_size - 1) // page_size
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"获取客户列表失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/customers/generate_code', methods=['GET'])
+@login_required
+def generate_customer_code_api():
+    """生成新的客户编号"""
+    try:
+        code = generate_customer_code()
+        return jsonify({'success': True, 'code': code})
+    except Exception as e:
+        logger.error(f"生成客户编号失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/customers/<int:customer_id>', methods=['GET'])
+@login_required
+def get_customer(customer_id):
+    """获取单个客户详情"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        cur.execute('''
+            SELECT id, customer_code, customer_name, contact_person,
+                   contact_phone, address, remarks, create_time, update_time
+            FROM customers WHERE id = ?
+        ''', (customer_id,))
+        
+        row = cur.fetchone()
+        conn.close()
+        
+        if not row:
+            return jsonify({'success': False, 'message': '客户不存在'}), 404
+        
+        columns = [desc[0] for desc in cur.description]
+        customer = dict(zip(columns, row))
+        
+        return jsonify({'success': True, 'data': customer})
+        
+    except Exception as e:
+        logger.error(f"获取客户详情失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/customers', methods=['POST'])
+@login_required
+def add_customer():
+    """添加客户"""
+    try:
+        data = request.get_json()
+        
+        # 验证必填字段
+        if not data.get('customer_name'):
+            return jsonify({'success': False, 'message': '客户名称不能为空'}), 400
+        
+        if not data.get('customer_code'):
+            data['customer_code'] = generate_customer_code()
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 检查编号是否重复
+        cur.execute('SELECT id FROM customers WHERE customer_code = ?', (data['customer_code'],))
+        if cur.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'message': '客户编号已存在'}), 400
+        
+        # 插入数据
+        cur.execute('''
+            INSERT INTO customers (customer_code, customer_name, contact_person,
+                                 contact_phone, address, remarks)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (
+            data['customer_code'],
+            data['customer_name'],
+            data.get('contact_person'),
+            data.get('contact_phone'),
+            data.get('address'),
+            data.get('remarks')
+        ))
+        
+        conn.commit()
+        customer_id = cur.lastrowid
+        conn.close()
+        
+        return jsonify({'success': True, 'message': '添加成功', 'id': customer_id})
+        
+    except Exception as e:
+        logger.error(f"添加客户失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/customers/<int:customer_id>', methods=['PUT'])
+@login_required
+def update_customer(customer_id):
+    """更新客户"""
+    try:
+        data = request.get_json()
+        
+        if not data.get('customer_name'):
+            return jsonify({'success': False, 'message': '客户名称不能为空'}), 400
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 检查客户是否存在
+        cur.execute('SELECT id FROM customers WHERE id = ?', (customer_id,))
+        if not cur.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'message': '客户不存在'}), 404
+        
+        # 更新数据
+        cur.execute('''
+            UPDATE customers 
+            SET customer_name = ?, contact_person = ?, contact_phone = ?,
+                address = ?, remarks = ?, update_time = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (
+            data['customer_name'],
+            data.get('contact_person'),
+            data.get('contact_phone'),
+            data.get('address'),
+            data.get('remarks'),
+            customer_id
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': '更新成功'})
+        
+    except Exception as e:
+        logger.error(f"更新客户失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/customers/<int:customer_id>', methods=['DELETE'])
+@login_required
+def delete_customer(customer_id):
+    """删除客户"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 检查是否有关联订单
+        cur.execute('SELECT COUNT(*) FROM sales_orders WHERE customer_id = ?', (customer_id,))
+        order_count = cur.fetchone()[0]
+        
+        if order_count > 0:
+            conn.close()
+            return jsonify({
+                'success': False, 
+                'message': f'该客户有 {order_count} 个关联订单，无法删除'
+            }), 400
+        
+        # 删除客户
+        cur.execute('DELETE FROM customers WHERE id = ?', (customer_id,))
+        
+        if cur.rowcount == 0:
+            conn.close()
+            return jsonify({'success': False, 'message': '客户不存在'}), 404
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': '删除成功'})
+        
+    except Exception as e:
+        logger.error(f"删除客户失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/customers/export', methods=['GET'])
+@login_required
+def export_customers():
+    """导出客户数据到Excel"""
+    try:
+        import io
+        from datetime import datetime
+        
+        search_name = request.args.get('name', '').strip()
+        search_phone = request.args.get('phone', '').strip()
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 构建查询条件
+        where_conditions = []
+        params = []
+        
+        if search_name:
+            where_conditions.append("customer_name LIKE ?")
+            params.append(f'%{search_name}%')
+        
+        if search_phone:
+            where_conditions.append("contact_phone LIKE ?")
+            params.append(f'%{search_phone}%')
+        
+        where_clause = ' AND '.join(where_conditions) if where_conditions else '1=1'
+        
+        # 查询所有数据
+        cur.execute(f'''
+            SELECT customer_code, customer_name, contact_person, contact_phone,
+                   address, remarks, create_time
+            FROM customers 
+            WHERE {where_clause}
+            ORDER BY create_time DESC
+        ''', params)
+        
+        rows = cur.fetchall()
+        conn.close()
+        
+        # 创建Excel
+        import pandas as pd
+        df = pd.DataFrame(rows, columns=[
+            '客户编号', '客户名称', '联系人', '联系电话', '收货地址', '备注', '创建时间'
+        ])
+        
+        # 输出到内存
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='客户列表')
+        
+        output.seek(0)
+        
+        # 生成文件名
+        filename = f'客户列表_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+        
+        from flask import send_file
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        logger.error(f"导出客户数据失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 if __name__ == '__main__':
         app.run(debug=True, host='0.0.0.0', port=5000)

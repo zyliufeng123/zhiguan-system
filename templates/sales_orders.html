@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>销售订单管理 - 智管订单系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+        }
+        .navbar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .content-wrapper {
+            margin-top: 20px;
+        }
+        .card {
+            border: none;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+        }
+        .card-header {
+            background: white;
+            border-bottom: 2px solid #f0f0f0;
+            padding: 20px;
+        }
+        .btn-info {
+            background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);
+            border: none;
+            color: white;
+        }
+        .btn-info:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(23, 162, 184, 0.4);
+        }
+        .table-hover tbody tr:hover {
+            background-color: #f0f8ff;
+        }
+        .search-box {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+        .badge-code {
+            background: #e3f2fd;
+            color: #1976d2;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            padding: 5px 10px;
+        }
+        .badge-status {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+        }
+        .status-pending { background: #fff3cd; color: #856404; }
+        .status-confirmed { background: #cfe2ff; color: #084298; }
+        .status-shipped { background: #d1e7dd; color: #0f5132; }
+        .status-completed { background: #d1ecf1; color: #0c5460; }
+        .status-cancelled { background: #f8d7da; color: #842029; }
+        .action-buttons .btn {
+            margin-right: 5px;
+            padding: 5px 10px;
+            font-size: 0.875rem;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+        .empty-state i {
+            font-size: 64px;
+            color: #ddd;
+            margin-bottom: 20px;
+        }
+        .order-total {
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/dashboard">
+                <i class="bi bi-cart-check"></i> 智管订单系统
+            </a>
+            <div class="d-flex">
+                <span class="navbar-text text-white me-3">
+                    <i class="bi bi-person-circle"></i> {{ session.user }}
+                </span>
+                <a href="/logout" class="btn btn-outline-light btn-sm">退出</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid content-wrapper">
+        <div class="row">
+            <!-- 引入统一侧边栏 -->
+            {% include 'includes/sidebar.html' %}
+
+            <!-- 主内容区 -->
+            <div class="col-md-10">
+                <!-- 搜索区域 -->
+                <div class="search-box">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-3">
+                            <label class="form-label">订单编号</label>
+                            <input type="text" class="form-control" id="searchOrderCode" placeholder="输入订单编号">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">客户名称</label>
+                            <input type="text" class="form-control" id="searchCustomer" placeholder="输入客户名称">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">订单状态</label>
+                            <select class="form-select" id="searchStatus">
+                                <option value="">全部状态</option>
+                                <option value="待确认">待确认</option>
+                                <option value="已确认">已确认</option>
+                                <option value="已发货">已发货</option>
+                                <option value="已完成">已完成</option>
+                                <option value="已取消">已取消</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <button class="btn btn-info" onclick="searchOrders()">
+                                <i class="bi bi-search"></i> 搜索
+                            </button>
+                            <button class="btn btn-secondary" onclick="resetSearch()">
+                                <i class="bi bi-arrow-counterclockwise"></i> 重置
+                            </button>
+                            <button class="btn btn-primary" onclick="showAddModal()">
+                                <i class="bi bi-plus-circle"></i> 新增订单
+                            </button>
+                            <button class="btn btn-success" onclick="exportExcel()">
+                                <i class="bi bi-file-earmark-excel"></i> 导出
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 数据表格 -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="bi bi-cart-check-fill"></i> 销售订单列表
+                            <span class="badge bg-info ms-2" id="totalCount">0</span>
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle" id="orderTable">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th width="5%">序号</th>
+                                        <th width="12%">订单编号</th>
+                                        <th width="12%">客户名称</th>
+                                        <th width="10%">下单日期</th>
+                                        <th width="10%">交货日期</th>
+                                        <th width="10%">订单金额</th>
+                                        <th width="8%">状态</th>
+                                        <th width="15%">备注</th>
+                                        <th width="18%">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="orderTableBody">
+                                    <!-- 数据通过JS动态加载 -->
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- 分页 -->
+                        <nav aria-label="Page navigation">
+                            <ul class="pagination justify-content-center" id="pagination">
+                            </ul>
+                        </nav>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加/编辑订单模态框 -->
+    <div class="modal fade" id="orderModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalTitle">新增销售订单</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="orderForm">
+                        <input type="hidden" id="orderId">
+                        
+                        <!-- 订单基本信息 -->
+                        <div class="card mb-3">
+                            <div class="card-header bg-light">
+                                <h6 class="mb-0"><i class="bi bi-info-circle"></i> 订单信息</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="row mb-3">
+                                    <div class="col-md-4">
+                                        <label class="form-label">订单编号</label>
+                                        <input type="text" class="form-control" id="orderCode" readonly style="background-color: #e9ecef;">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label"><span class="text-danger">*</span> 客户名称</label>
+                                        <select class="form-select" id="customerId" required onchange="updateCustomerInfo()">
+                                            <option value="">请选择客户</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">订单状态</label>
+                                        <select class="form-select" id="orderStatus">
+                                            <option value="待确认">待确认</option>
+                                            <option value="已确认">已确认</option>
+                                            <option value="已发货">已发货</option>
+                                            <option value="已完成">已完成</option>
+                                            <option value="已取消">已取消</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="row mb-3">
+                                    <div class="col-md-4">
+                                        <label class="form-label"><span class="text-danger">*</span> 下单日期</label>
+                                        <input type="date" class="form-control" id="orderDate" required>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">交货日期</label>
+                                        <input type="date" class="form-control" id="deliveryDate">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">联系电话</label>
+                                        <input type="text" class="form-control" id="contactPhone" readonly style="background-color: #f8f9fa;">
+                                    </div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label class="form-label">收货地址</label>
+                                    <textarea class="form-control" id="deliveryAddress" rows="2"></textarea>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label class="form-label">备注</label>
+                                    <textarea class="form-control" id="remarks" rows="2"></textarea>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 订单明细 -->
+                        <div class="card">
+                            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0"><i class="bi bi-list-ul"></i> 订单明细</h6>
+                                <button type="button" class="btn btn-sm btn-primary" onclick="addOrderItem()">
+                                    <i class="bi bi-plus-circle"></i> 添加商品
+                                </button>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-bordered" id="itemsTable">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th width="20%">商品名称 <span class="text-danger">*</span></th>
+                                                <th width="12%">类别</th>
+                                                <th width="12%">规格</th>
+                                                <th width="10%">数量 <span class="text-danger">*</span></th>
+                                                <th width="8%">单位</th>
+                                                <th width="12%">单价 <span class="text-danger">*</span></th>
+                                                <th width="12%">金额</th>
+                                                <th width="14%">操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="itemsTableBody">
+                                            <!-- 动态添加行 -->
+                                        </tbody>
+                                        <tfoot>
+                                            <tr class="table-info">
+                                                <td colspan="6" class="text-end"><strong>订单总额：</strong></td>
+                                                <td colspan="2">
+                                                    <strong class="text-danger" id="totalAmount">¥0.00</strong>
+                                                </td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-info" onclick="saveOrder()">保存订单</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 订单详情模态框 -->
+    <div class="modal fade" id="detailModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-eye"></i> 订单详情</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="detailContent">
+                    <!-- 详情内容动态加载 -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                    <button type="button" class="btn btn-primary" onclick="printOrder()">
+                        <i class="bi bi-printer"></i> 打印订单
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentPage = 1;
+        let pageSize = 15;
+        let orderModal, detailModal;
+        let itemIndex = 0;
+        let customers = [];
+
+        // 页面加载完成
+        document.addEventListener('DOMContentLoaded', function() {
+            orderModal = new bootstrap.Modal(document.getElementById('orderModal'));
+            detailModal = new bootstrap.Modal(document.getElementById('detailModal'));
+            loadOrders();
+            loadCustomers();
+            
+            // 设置今天日期
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('orderDate').value = today;
+        });
+
+        // 加载客户列表
+        function loadCustomers() {
+            fetch('/api/customers?page=1&page_size=1000')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        customers = data.data.items;
+                        updateCustomerSelect();
+                    }
+                });
+        }
+
+        // 更新客户下拉框
+        function updateCustomerSelect() {
+            const select = document.getElementById('customerId');
+            select.innerHTML = '<option value="">请选择客户</option>';
+            customers.forEach(customer => {
+                select.innerHTML += `<option value="${customer.id}" 
+                    data-phone="${customer.contact_phone || ''}" 
+                    data-address="${customer.address || ''}">
+                    ${customer.customer_name}
+                </option>`;
+            });
+        }
+
+        // 更新客户信息
+        function updateCustomerInfo() {
+            const select = document.getElementById('customerId');
+            const option = select.options[select.selectedIndex];
+            
+            if (option.value) {
+                document.getElementById('contactPhone').value = option.dataset.phone || '';
+                document.getElementById('deliveryAddress').value = option.dataset.address || '';
+            } else {
+                document.getElementById('contactPhone').value = '';
+                document.getElementById('deliveryAddress').value = '';
+            }
+        }
+
+        // 加载订单列表
+        function loadOrders(page = 1) {
+            currentPage = page;
+            const searchOrderCode = document.getElementById('searchOrderCode').value;
+            const searchCustomer = document.getElementById('searchCustomer').value;
+            const searchStatus = document.getElementById('searchStatus').value;
+
+            const params = new URLSearchParams({
+                page: page,
+                page_size: pageSize,
+                order_code: searchOrderCode,
+                customer: searchCustomer,
+                status: searchStatus
+            });
+
+            fetch(`/api/sales_orders?${params}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        renderTable(data.data.items, data.data.page, data.data.page_size);
+                        renderPagination(data.data.total, data.data.page, data.data.page_size);
+                        document.getElementById('totalCount').textContent = data.data.total;
+                    } else {
+                        showError('加载失败：' + data.message);
+                    }
+                })
+                .catch(error => {
+                    showError('网络错误：' + error.message);
+                });
+        }
+
+        // 渲染表格
+        function renderTable(items, page, pageSize) {
+            const tbody = document.getElementById('orderTableBody');
+            
+            if (items.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="9">
+                            <div class="empty-state">
+                                <i class="bi bi-inbox"></i>
+                                <p>暂无订单数据</p>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = items.map((item, index) => {
+                const statusClass = getStatusClass(item.order_status);
+                return `
+                    <tr>
+                        <td>${(page - 1) * pageSize + index + 1}</td>
+                        <td><span class="badge-code">${item.order_code}</span></td>
+                        <td><strong>${item.customer_name}</strong></td>
+                        <td>${formatDate(item.order_date)}</td>
+                        <td>${formatDate(item.delivery_date)}</td>
+                        <td class="order-total">¥${parseFloat(item.total_amount || 0).toFixed(2)}</td>
+                        <td><span class="badge-status ${statusClass}">${item.order_status}</span></td>
+                        <td>${item.remarks || '-'}</td>
+                        <td class="action-buttons">
+                            <button class="btn btn-sm btn-outline-info" onclick="viewOrder(${item.id})">
+                                <i class="bi bi-eye"></i> 查看
+                            </button>
+                            <button class="btn btn-sm btn-outline-primary" onclick="editOrder(${item.id})">
+                                <i class="bi bi-pencil"></i> 编辑
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteOrder(${item.id}, '${item.order_code}')">
+                                <i class="bi bi-trash"></i> 删除
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // 获取状态样式类
+        function getStatusClass(status) {
+            const statusMap = {
+                '待确认': 'status-pending',
+                '已确认': 'status-confirmed',
+                '已发货': 'status-shipped',
+                '已完成': 'status-completed',
+                '已取消': 'status-cancelled'
+            };
+            return statusMap[status] || 'status-pending';
+        }
+
+        // 渲染分页（与客户管理相同）
+        function renderPagination(total, page, pageSize) {
+            const totalPages = Math.ceil(total / pageSize);
+            const pagination = document.getElementById('pagination');
+            
+            if (totalPages <= 1) {
+                pagination.innerHTML = '';
+                return;
+            }
+
+            let html = '';
+            html += `<li class="page-item ${page === 1 ? 'disabled' : ''}">
+                        <a class="page-link" href="#" onclick="loadOrders(${page - 1}); return false;">上一页</a>
+                     </li>`;
+            
+            for (let i = 1; i <= totalPages; i++) {
+                if (i === 1 || i === totalPages || (i >= page - 2 && i <= page + 2)) {
+                    html += `<li class="page-item ${i === page ? 'active' : ''}">
+                                <a class="page-link" href="#" onclick="loadOrders(${i}); return false;">${i}</a>
+                             </li>`;
+                } else if (i === page - 3 || i === page + 3) {
+                    html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+                }
+            }
+            
+            html += `<li class="page-item ${page === totalPages ? 'disabled' : ''}">
+                        <a class="page-link" href="#" onclick="loadOrders(${page + 1}); return false;">下一页</a>
+                     </li>`;
+            
+            pagination.innerHTML = html;
+        }
+
+        // 显示新增模态框
+        function showAddModal() {
+            document.getElementById('modalTitle').textContent = '新增销售订单';
+            document.getElementById('orderForm').reset();
+            document.getElementById('orderId').value = '';
+            itemIndex = 0;
+            document.getElementById('itemsTableBody').innerHTML = '';
+            
+            // 获取新的订单编号
+            fetch('/api/sales_orders/generate_code')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('orderCode').value = data.code;
+                    }
+                });
+            
+            // 设置今天日期
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('orderDate').value = today;
+            
+            // 添加一行空明细
+            addOrderItem();
+            
+            orderModal.show();
+        }
+
+        // 添加订单明细行
+        function addOrderItem() {
+            itemIndex++;
+            const tbody = document.getElementById('itemsTableBody');
+            const row = document.createElement('tr');
+            row.id = `item-${itemIndex}`;
+            row.innerHTML = `
+                <td><input type="text" class="form-control form-control-sm" id="product_name_${itemIndex}" required></td>
+                <td><input type="text" class="form-control form-control-sm" id="category_${itemIndex}"></td>
+                <td><input type="text" class="form-control form-control-sm" id="specification_${itemIndex}"></td>
+                <td><input type="number" class="form-control form-control-sm" id="quantity_${itemIndex}" 
+                    step="0.01" min="0" required onchange="calculateAmount(${itemIndex})"></td>
+                <td><input type="text" class="form-control form-control-sm" id="unit_${itemIndex}" value="件"></td>
+                <td><input type="number" class="form-control form-control-sm" id="price_${itemIndex}" 
+                    step="0.01" min="0" required onchange="calculateAmount(${itemIndex})"></td>
+                <td><input type="number" class="form-control form-control-sm" id="amount_${itemIndex}" 
+                    readonly style="background-color: #f8f9fa;"></td>
+                <td>
+                    <button type="button" class="btn btn-sm btn-danger" onclick="removeOrderItem(${itemIndex})">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        }
+
+        // 删除订单明细行
+        function removeOrderItem(index) {
+            const row = document.getElementById(`item-${index}`);
+            if (row) {
+                row.remove();
+                calculateTotalAmount();
+            }
+        }
+
+        // 计算单行金额
+        function calculateAmount(index) {
+            const quantity = parseFloat(document.getElementById(`quantity_${index}`).value) || 0;
+            const price = parseFloat(document.getElementById(`price_${index}`).value) || 0;
+            const amount = quantity * price;
+            
+            document.getElementById(`amount_${index}`).value = amount.toFixed(2);
+            calculateTotalAmount();
+        }
+
+        // 计算总金额
+        function calculateTotalAmount() {
+            let total = 0;
+            const tbody = document.getElementById('itemsTableBody');
+            const rows = tbody.querySelectorAll('tr');
+            
+            rows.forEach(row => {
+                const amountInput = row.querySelector('input[id^="amount_"]');
+                if (amountInput) {
+                    total += parseFloat(amountInput.value) || 0;
+                }
+            });
+            
+            document.getElementById('totalAmount').textContent = `¥${total.toFixed(2)}`;
+        }
+
+        // 保存订单
+        function saveOrder() {
+            const id = document.getElementById('orderId').value;
+            
+            // 收集订单数据
+            const orderData = {
+                order_code: document.getElementById('orderCode').value,
+                customer_id: document.getElementById('customerId').value,
+                order_date: document.getElementById('orderDate').value,
+                delivery_date: document.getElementById('deliveryDate').value,
+                order_status: document.getElementById('orderStatus').value,
+                delivery_address: document.getElementById('deliveryAddress').value,
+                remarks: document.getElementById('remarks').value,
+                items: []
+            };
+
+            // 验证必填字段
+            if (!orderData.customer_id) {
+                showError('请选择客户');
+                return;
+            }
+            if (!orderData.order_date) {
+                showError('请选择下单日期');
+                return;
+            }
+
+            // 收集订单明细
+            const tbody = document.getElementById('itemsTableBody');
+            const rows = tbody.querySelectorAll('tr');
+            
+            if (rows.length === 0) {
+                showError('请至少添加一条订单明细');
+                return;
+            }
+
+            rows.forEach((row, index) => {
+                const rowId = row.id.split('-')[1];
+                const item = {
+                    product_name: document.getElementById(`product_name_${rowId}`).value,
+                    category: document.getElementById(`category_${rowId}`).value,
+                    specification: document.getElementById(`specification_${rowId}`).value,
+                    quantity: parseFloat(document.getElementById(`quantity_${rowId}`).value) || 0,
+                    unit: document.getElementById(`unit_${rowId}`).value || '件',
+                    price: parseFloat(document.getElementById(`price_${rowId}`).value) || 0,
+                    amount: parseFloat(document.getElementById(`amount_${rowId}`).value) || 0
+                };
+
+                if (!item.product_name || item.quantity <= 0 || item.price < 0) {
+                    showError(`第${index + 1}行数据不完整`);
+                    return;
+                }
+
+                orderData.items.push(item);
+            });
+
+            if (orderData.items.length === 0) {
+                showError('请填写完整的订单明细');
+                return;
+            }
+
+            // 提交数据
+            const url = id ? `/api/sales_orders/${id}` : '/api/sales_orders';
+            const method = id ? 'PUT' : 'POST';
+
+            fetch(url, {
+                method: method,
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(orderData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showSuccess(id ? '更新成功' : '添加成功');
+                    orderModal.hide();
+                    loadOrders(currentPage);
+                } else {
+                    showError(data.message);
+                }
+            })
+            .catch(error => {
+                showError('操作失败：' + error.message);
+            });
+        }
+
+        // 查看订单详情
+        function viewOrder(id) {
+            fetch(`/api/sales_orders/${id}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        renderOrderDetail(data.data);
+                        detailModal.show();
+                    } else {
+                        showError('加载失败：' + data.message);
+                    }
+                });
+        }
+
+        // 渲染订单详情
+        function renderOrderDetail(order) {
+            const statusClass = getStatusClass(order.order_status);
+            let html = `
+                <div class="card mb-3">
+                    <div class="card-header bg-light">
+                        <h6 class="mb-0">订单信息</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6 mb-2"><strong>订单编号：</strong> ${order.order_code}</div>
+                            <div class="col-md-6 mb-2"><strong>客户名称：</strong> ${order.customer_name}</div>
+                            <div class="col-md-6 mb-2"><strong>下单日期：</strong> ${formatDate(order.order_date)}</div>
+                            <div class="col-md-6 mb-2"><strong>交货日期：</strong> ${formatDate(order.delivery_date)}</div>
+                            <div class="col-md-6 mb-2"><strong>订单状态：</strong> <span class="badge-status ${statusClass}">${order.order_status}</span></div>
+                            <div class="col-md-6 mb-2"><strong>订单总额：</strong> <span class="text-danger">¥${parseFloat(order.total_amount).toFixed(2)}</span></div>
+                            <div class="col-md-12 mb-2"><strong>收货地址：</strong> ${order.delivery_address || '-'}</div>
+                            <div class="col-md-12 mb-2"><strong>备注：</strong> ${order.remarks || '-'}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header bg-light">
+                        <h6 class="mb-0">订单明细</h6>
+                    </div>
+                    <div class="card-body">
+                        <table class="table table-bordered">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>序号</th>
+                                    <th>商品名称</th>
+                                    <th>类别</th>
+                                    <th>规格</th>
+                                    <th>数量</th>
+                                    <th>单位</th>
+                                    <th>单价</th>
+                                    <th>金额</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+            `;
+
+            order.items.forEach((item, index) => {
+                html += `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td>${item.product_name}</td>
+                        <td>${item.category || '-'}</td>
+                        <td>${item.specification || '-'}</td>
+                        <td>${item.quantity}</td>
+                        <td>${item.unit}</td>
+                        <td>¥${parseFloat(item.price).toFixed(2)}</td>
+                        <td>¥${parseFloat(item.amount).toFixed(2)}</td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                            </tbody>
+                            <tfoot>
+                                <tr class="table-info">
+                                    <td colspan="7" class="text-end"><strong>订单总额：</strong></td>
+                                    <td><strong class="text-danger">¥${parseFloat(order.total_amount).toFixed(2)}</strong></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('detailContent').innerHTML = html;
+        }
+
+        // 编辑订单（简化版，实际应完整实现）
+        function editOrder(id) {
+            showError('编辑功能开发中...');
+            // TODO: 实现编辑功能
+        }
+
+        // 删除订单
+        function deleteOrder(id, orderCode) {
+            if (!confirm(`确定要删除订单"${orderCode}"吗？\n\n删除后无法恢复！`)) {
+                return;
+            }
+
+            fetch(`/api/sales_orders/${id}`, {method: 'DELETE'})
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showSuccess('删除成功');
+                        loadOrders(currentPage);
+                    } else {
+                        showError(data.message);
+                    }
+                })
+                .catch(error => {
+                    showError('删除失败：' + error.message);
+                });
+        }
+
+        // 打印订单
+        function printOrder() {
+            window.print();
+        }
+
+        // 搜索
+        function searchOrders() {
+            loadOrders(1);
+        }
+
+        // 重置搜索
+        function resetSearch() {
+            document.getElementById('searchOrderCode').value = '';
+            document.getElementById('searchCustomer').value = '';
+            document.getElementById('searchStatus').value = '';
+            loadOrders(1);
+        }
+
+        // 导出Excel
+        function exportExcel() {
+            const params = new URLSearchParams({
+                order_code: document.getElementById('searchOrderCode').value,
+                customer: document.getElementById('searchCustomer').value,
+                status: document.getElementById('searchStatus').value
+            });
+            
+            window.location.href = `/api/sales_orders/export?${params}`;
+        }
+
+        // 格式化日期
+        function formatDate(date) {
+            if (!date) return '-';
+            return date.substring(0, 10);
+        }
+
+        // 显示成功消息
+        function showSuccess(message) {
+            alert('✅ ' + message);
+        }
+
+        // 显示错误消息
+        function showError(message) {
+            alert('❌ ' + message);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>客户管理 - 智管订单系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+        }
+        .navbar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .content-wrapper {
+            margin-top: 20px;
+        }
+        .card {
+            border: none;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+        }
+        .card-header {
+            background: white;
+            border-bottom: 2px solid #f0f0f0;
+            padding: 20px;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        .table-hover tbody tr:hover {
+            background-color: #f8f9ff;
+        }
+        .search-box {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+        .badge-code {
+            background: #e3f2fd;
+            color: #1976d2;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            padding: 5px 10px;
+        }
+        .action-buttons .btn {
+            margin-right: 5px;
+            padding: 5px 10px;
+            font-size: 0.875rem;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+        .empty-state i {
+            font-size: 64px;
+            color: #ddd;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/dashboard">
+                <i class="bi bi-person-lines-fill"></i> 智管订单系统
+            </a>
+            <div class="d-flex">
+                <span class="navbar-text text-white me-3">
+                    <i class="bi bi-person-circle"></i> {{ session.username }}
+                </span>
+                <a href="/logout" class="btn btn-outline-light btn-sm">退出</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid content-wrapper">
+        <div class="row">
+            <!-- 引入统一侧边栏 -->
+{% include 'includes/sidebar.html' %}
+
+            <!-- 主内容区 -->
+            <div class="col-md-10">
+                <!-- 搜索区域 -->
+                <div class="search-box">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-4">
+                            <label class="form-label">客户名称</label>
+                            <input type="text" class="form-control" id="searchName" placeholder="输入客户名称">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">联系电话</label>
+                            <input type="text" class="form-control" id="searchPhone" placeholder="输入联系电话">
+                        </div>
+                        <div class="col-md-5">
+                            <button class="btn btn-primary" onclick="searchCustomers()">
+                                <i class="bi bi-search"></i> 搜索
+                            </button>
+                            <button class="btn btn-secondary" onclick="resetSearch()">
+                                <i class="bi bi-arrow-counterclockwise"></i> 重置
+                            </button>
+                            <button class="btn btn-success" onclick="showAddModal()">
+                                <i class="bi bi-plus-circle"></i> 新增客户
+                            </button>
+                            <button class="btn btn-info" onclick="exportExcel()">
+                                <i class="bi bi-file-earmark-excel"></i> 导出
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 数据表格 -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="bi bi-people-fill"></i> 客户列表
+                            <span class="badge bg-primary ms-2" id="totalCount">0</span>
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle" id="customerTable">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th width="5%">序号</th>
+                                        <th width="12%">客户编号</th>
+                                        <th width="15%">客户名称</th>
+                                        <th width="10%">联系人</th>
+                                        <th width="12%">联系电话</th>
+                                        <th width="20%">收货地址</th>
+                                        <th width="10%">创建时间</th>
+                                        <th width="16%">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="customerTableBody">
+                                    <!-- 数据通过JS动态加载 -->
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- 分页 -->
+                        <nav aria-label="Page navigation">
+                            <ul class="pagination justify-content-center" id="pagination">
+                            </ul>
+                        </nav>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加/编辑客户模态框 -->
+    <div class="modal fade" id="customerModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalTitle">新增客户</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="customerForm">
+                        <input type="hidden" id="customerId">
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">客户编号</label>
+                                <input type="text" class="form-control" id="customerCode" readonly style="background-color: #e9ecef;">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label"><span class="text-danger">*</span> 客户名称</label>
+                                <input type="text" class="form-control" id="customerName" required>
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">联系人</label>
+                                <input type="text" class="form-control" id="contactPerson">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">联系电话</label>
+                                <input type="text" class="form-control" id="contactPhone">
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">收货地址</label>
+                            <textarea class="form-control" id="address" rows="2"></textarea>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">备注</label>
+                            <textarea class="form-control" id="remarks" rows="2"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="saveCustomer()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentPage = 1;
+        let pageSize = 15;
+        let customerModal;
+
+        // 页面加载完成
+        document.addEventListener('DOMContentLoaded', function() {
+            customerModal = new bootstrap.Modal(document.getElementById('customerModal'));
+            loadCustomers();
+        });
+
+        // 加载客户列表
+        function loadCustomers(page = 1) {
+            currentPage = page;
+            const searchName = document.getElementById('searchName').value;
+            const searchPhone = document.getElementById('searchPhone').value;
+
+            const params = new URLSearchParams({
+                page: page,
+                page_size: pageSize,
+                name: searchName,
+                phone: searchPhone
+            });
+
+            fetch(`/api/customers?${params}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        renderTable(data.data.items, data.data.page, data.data.page_size);
+                        renderPagination(data.data.total, data.data.page, data.data.page_size);
+                        document.getElementById('totalCount').textContent = data.data.total;
+                    } else {
+                        showError('加载失败：' + data.message);
+                    }
+                })
+                .catch(error => {
+                    showError('网络错误：' + error.message);
+                });
+        }
+
+        // 渲染表格
+        function renderTable(items, page, pageSize) {
+            const tbody = document.getElementById('customerTableBody');
+            
+            if (items.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="8">
+                            <div class="empty-state">
+                                <i class="bi bi-inbox"></i>
+                                <p>暂无数据</p>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = items.map((item, index) => `
+                <tr>
+                    <td>${(page - 1) * pageSize + index + 1}</td>
+                    <td><span class="badge-code">${item.customer_code}</span></td>
+                    <td><strong>${item.customer_name}</strong></td>
+                    <td>${item.contact_person || '-'}</td>
+                    <td>${item.contact_phone || '-'}</td>
+                    <td>${item.address || '-'}</td>
+                    <td><small>${formatDateTime(item.create_time)}</small></td>
+                    <td class="action-buttons">
+                        <button class="btn btn-sm btn-outline-primary" onclick="editCustomer(${item.id})">
+                            <i class="bi bi-pencil"></i> 编辑
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteCustomer(${item.id}, '${item.customer_name}')">
+                            <i class="bi bi-trash"></i> 删除
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // 渲染分页
+        function renderPagination(total, page, pageSize) {
+            const totalPages = Math.ceil(total / pageSize);
+            const pagination = document.getElementById('pagination');
+            
+            if (totalPages <= 1) {
+                pagination.innerHTML = '';
+                return;
+            }
+
+            let html = '';
+            
+            // 上一页
+            html += `<li class="page-item ${page === 1 ? 'disabled' : ''}">
+                        <a class="page-link" href="#" onclick="loadCustomers(${page - 1}); return false;">上一页</a>
+                     </li>`;
+            
+            // 页码
+            for (let i = 1; i <= totalPages; i++) {
+                if (i === 1 || i === totalPages || (i >= page - 2 && i <= page + 2)) {
+                    html += `<li class="page-item ${i === page ? 'active' : ''}">
+                                <a class="page-link" href="#" onclick="loadCustomers(${i}); return false;">${i}</a>
+                             </li>`;
+                } else if (i === page - 3 || i === page + 3) {
+                    html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+                }
+            }
+            
+            // 下一页
+            html += `<li class="page-item ${page === totalPages ? 'disabled' : ''}">
+                        <a class="page-link" href="#" onclick="loadCustomers(${page + 1}); return false;">下一页</a>
+                     </li>`;
+            
+            pagination.innerHTML = html;
+        }
+
+        // 显示新增模态框
+        function showAddModal() {
+            document.getElementById('modalTitle').textContent = '新增客户';
+            document.getElementById('customerForm').reset();
+            document.getElementById('customerId').value = '';
+            
+            // 获取新的客户编号
+            fetch('/api/customers/generate_code')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('customerCode').value = data.code;
+                    }
+                });
+            
+            customerModal.show();
+        }
+
+        // 编辑客户
+        function editCustomer(id) {
+            fetch(`/api/customers/${id}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const customer = data.data;
+                        document.getElementById('modalTitle').textContent = '编辑客户';
+                        document.getElementById('customerId').value = customer.id;
+                        document.getElementById('customerCode').value = customer.customer_code;
+                        document.getElementById('customerName').value = customer.customer_name;
+                        document.getElementById('contactPerson').value = customer.contact_person || '';
+                        document.getElementById('contactPhone').value = customer.contact_phone || '';
+                        document.getElementById('address').value = customer.address || '';
+                        document.getElementById('remarks').value = customer.remarks || '';
+                        
+                        customerModal.show();
+                    } else {
+                        showError('加载失败：' + data.message);
+                    }
+                });
+        }
+
+        // 保存客户
+        function saveCustomer() {
+            const id = document.getElementById('customerId').value;
+            const data = {
+                customer_code: document.getElementById('customerCode').value,
+                customer_name: document.getElementById('customerName').value,
+                contact_person: document.getElementById('contactPerson').value,
+                contact_phone: document.getElementById('contactPhone').value,
+                address: document.getElementById('address').value,
+                remarks: document.getElementById('remarks').value
+            };
+
+            if (!data.customer_name) {
+                showError('请输入客户名称');
+                return;
+            }
+
+            const url = id ? `/api/customers/${id}` : '/api/customers';
+            const method = id ? 'PUT' : 'POST';
+
+            fetch(url, {
+                method: method,
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showSuccess(id ? '更新成功' : '添加成功');
+                    customerModal.hide();
+                    loadCustomers(currentPage);
+                } else {
+                    showError(data.message);
+                }
+            })
+            .catch(error => {
+                showError('操作失败：' + error.message);
+            });
+        }
+
+        // 删除客户
+        function deleteCustomer(id, name) {
+            if (!confirm(`确定要删除客户"${name}"吗？\n\n删除后无法恢复！`)) {
+                return;
+            }
+
+            fetch(`/api/customers/${id}`, {method: 'DELETE'})
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showSuccess('删除成功');
+                        loadCustomers(currentPage);
+                    } else {
+                        showError(data.message);
+                    }
+                })
+                .catch(error => {
+                    showError('删除失败：' + error.message);
+                });
+        }
+
+        // 搜索
+        function searchCustomers() {
+            loadCustomers(1);
+        }
+
+        // 重置搜索
+        function resetSearch() {
+            document.getElementById('searchName').value = '';
+            document.getElementById('searchPhone').value = '';
+            loadCustomers(1);
+        }
+
+        // 导出Excel
+        function exportExcel() {
+            const searchName = document.getElementById('searchName').value;
+            const searchPhone = document.getElementById('searchPhone').value;
+            
+            const params = new URLSearchParams({
+                name: searchName,
+                phone: searchPhone
+            });
+            
+            window.location.href = `/api/customers/export?${params}`;
+        }
+
+        // 格式化日期时间
+        function formatDateTime(datetime) {
+            if (!datetime) return '-';
+            return datetime.substring(0, 16).replace('T', ' ');
+        }
+
+        // 显示成功消息
+        function showSuccess(message) {
+            alert('✅ ' + message);
+        }
+
+        // 显示错误消息
+        function showError(message) {
+            alert('❌ ' + message);
+        }
+    </script>
+</body>
+</html>
