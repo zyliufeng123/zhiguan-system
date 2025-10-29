@@ -2123,6 +2123,433 @@ def export_sales_orders():
     except Exception as e:
         logger.error(f"导出销售订单数据失败: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
+    
+    # ========== 采购订单管理 API ==========
+
+def generate_purchase_order_code():
+    """生成采购单号"""
+    conn = get_db()
+    cur = conn.cursor()
+    today = datetime.now().strftime('%Y%m%d')
+    prefix = f'CG{today}'
+    
+    cur.execute('''
+        SELECT order_code FROM purchase_orders 
+        WHERE order_code LIKE ? 
+        ORDER BY order_code DESC LIMIT 1
+    ''', (f'{prefix}%',))
+    
+    result = cur.fetchone()
+    conn.close()
+    
+    if result:
+        last_num = int(result[0][-4:])
+        new_num = last_num + 1
+    else:
+        new_num = 1
+    
+    return f'{prefix}{new_num:04d}'
+
+
+@app.route('/purchase_orders')
+@login_required
+def purchase_orders_page():
+    """采购订单管理页面"""
+    return render_template('purchase_orders.html')
+
+
+@app.route('/api/purchase_orders', methods=['GET'])
+@login_required
+def get_purchase_orders():
+    """获取采购订单列表"""
+    try:
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 15))
+        search_order_code = request.args.get('order_code', '').strip()
+        search_supplier = request.args.get('supplier', '').strip()
+        search_status = request.args.get('status', '').strip()
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        where_conditions = []
+        params = []
+        
+        if search_order_code:
+            where_conditions.append("order_code LIKE ?")
+            params.append(f'%{search_order_code}%')
+        
+        if search_supplier:
+            where_conditions.append("supplier_name LIKE ?")
+            params.append(f'%{search_supplier}%')
+        
+        if search_status:
+            where_conditions.append("status = ?")
+            params.append(search_status)
+        
+        where_clause = ' AND '.join(where_conditions) if where_conditions else '1=1'
+        
+        cur.execute(f"SELECT COUNT(*) FROM purchase_orders WHERE {where_clause}", params)
+        total = cur.fetchone()[0]
+        
+        offset = (page - 1) * page_size
+        cur.execute(f'''
+            SELECT id, order_code, supplier_id, supplier_name, order_date, 
+                   expected_date, total_amount, status, remarks, create_time
+            FROM purchase_orders 
+            WHERE {where_clause}
+            ORDER BY create_time DESC
+            LIMIT ? OFFSET ?
+        ''', params + [page_size, offset])
+        
+        columns = [desc[0] for desc in cur.description]
+        items = [dict(zip(columns, row)) for row in cur.fetchall()]
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'items': items,
+                'total': total,
+                'page': page,
+                'page_size': page_size,
+                'total_pages': (total + page_size - 1) // page_size
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"获取采购订单失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/purchase_orders/generate_code', methods=['GET'])
+@login_required
+def generate_purchase_order_code_api():
+    """生成采购单号API"""
+    try:
+        code = generate_purchase_order_code()
+        return jsonify({'success': True, 'code': code})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/purchase_orders/<int:order_id>', methods=['GET'])
+@login_required
+def get_purchase_order(order_id):
+    """获取采购单详情"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        cur.execute('''
+            SELECT id, order_code, supplier_id, supplier_name, order_date,
+                   expected_date, total_amount, status, remarks, create_time
+            FROM purchase_orders WHERE id = ?
+        ''', (order_id,))
+        
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'success': False, 'message': '采购单不存在'}), 404
+        
+        columns = [desc[0] for desc in cur.description]
+        order = dict(zip(columns, row))
+        
+        cur.execute('''
+            SELECT id, product_name, category, specification, unit,
+                   quantity, price, amount, remarks
+            FROM purchase_order_items
+            WHERE order_id = ?
+            ORDER BY id
+        ''', (order_id,))
+        
+        item_columns = [desc[0] for desc in cur.description]
+        items = [dict(zip(item_columns, row)) for row in cur.fetchall()]
+        
+        order['items'] = items
+        conn.close()
+        
+        return jsonify({'success': True, 'data': order})
+        
+    except Exception as e:
+        logger.error(f"获取采购单详情失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/purchase_orders', methods=['POST'])
+@login_required
+def add_purchase_order():
+    """添加采购订单"""
+    try:
+        data = request.get_json()
+        
+        if not data.get('supplier_id'):
+            return jsonify({'success': False, 'message': '请选择供应商'}), 400
+        
+        if not data.get('order_date'):
+            return jsonify({'success': False, 'message': '请选择采购日期'}), 400
+        
+        items = data.get('items', [])
+        if not items:
+            return jsonify({'success': False, 'message': '请至少添加一条采购明细'}), 400
+        
+        if not data.get('order_code'):
+            data['order_code'] = generate_purchase_order_code()
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        cur.execute('SELECT supplier_name FROM suppliers WHERE id = ?', (data['supplier_id'],))
+        supplier = cur.fetchone()
+        if not supplier:
+            conn.close()
+            return jsonify({'success': False, 'message': '供应商不存在'}), 404
+        
+        supplier_name = supplier[0]
+        total_amount = sum(float(item['amount']) for item in items)
+        
+        cur.execute('''
+            INSERT INTO purchase_orders (
+                order_code, supplier_id, supplier_name, order_date,
+                expected_date, total_amount, status, remarks, create_user
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            data['order_code'],
+            data['supplier_id'],
+            supplier_name,
+            data['order_date'],
+            data.get('expected_date'),
+            total_amount,
+            data.get('order_status', '待确认'),
+            data.get('remarks'),
+            session.get('user', 'system')
+        ))
+        
+        order_id = cur.lastrowid
+        
+        for item in items:
+            cur.execute('''
+                INSERT INTO purchase_order_items (
+                    order_id, product_name, category, specification,
+                    unit, quantity, price, amount, remarks
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                order_id,
+                item['product_name'],
+                item.get('category'),
+                item.get('specification'),
+                item.get('unit', '件'),
+                item['quantity'],
+                item['price'],
+                item['amount'],
+                item.get('remarks')
+            ))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': '采购单创建成功',
+            'order_id': order_id,
+            'order_code': data['order_code']
+        })
+        
+    except Exception as e:
+        logger.error(f"添加采购单失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/purchase_orders/<int:order_id>', methods=['PUT'])
+@login_required
+def update_purchase_order(order_id):
+    """更新采购订单"""
+    try:
+        data = request.get_json()
+        
+        if not data.get('supplier_id'):
+            return jsonify({'success': False, 'message': '请选择供应商'}), 400
+        
+        items = data.get('items', [])
+        if not items:
+            return jsonify({'success': False, 'message': '请至少添加一条采购明细'}), 400
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        cur.execute('SELECT status FROM purchase_orders WHERE id = ?', (order_id,))
+        order = cur.fetchone()
+        if not order:
+            conn.close()
+            return jsonify({'success': False, 'message': '采购单不存在'}), 404
+        
+        if order[0] in ['已完成', '已取消']:
+            conn.close()
+            return jsonify({'success': False, 'message': f'订单状态为"{order[0]}"，不允许修改'}), 400
+        
+        cur.execute('SELECT supplier_name FROM suppliers WHERE id = ?', (data['supplier_id'],))
+        supplier = cur.fetchone()
+        if not supplier:
+            conn.close()
+            return jsonify({'success': False, 'message': '供应商不存在'}), 404
+        
+        supplier_name = supplier[0]
+        total_amount = sum(float(item['amount']) for item in items)
+        
+        cur.execute('''
+            UPDATE purchase_orders 
+            SET supplier_id = ?, supplier_name = ?, order_date = ?,
+                expected_date = ?, total_amount = ?, status = ?,
+                remarks = ?, update_time = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (
+            data['supplier_id'],
+            supplier_name,
+            data['order_date'],
+            data.get('expected_date'),
+            total_amount,
+            data.get('order_status', '待确认'),
+            data.get('remarks'),
+            order_id
+        ))
+        
+        cur.execute('DELETE FROM purchase_order_items WHERE order_id = ?', (order_id,))
+        
+        for item in items:
+            cur.execute('''
+                INSERT INTO purchase_order_items (
+                    order_id, product_name, category, specification,
+                    unit, quantity, price, amount, remarks
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                order_id,
+                item['product_name'],
+                item.get('category'),
+                item.get('specification'),
+                item.get('unit', '件'),
+                item['quantity'],
+                item['price'],
+                item['amount'],
+                item.get('remarks')
+            ))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': '采购单更新成功'})
+        
+    except Exception as e:
+        logger.error(f"更新采购单失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/purchase_orders/<int:order_id>', methods=['DELETE'])
+@login_required
+def delete_purchase_order(order_id):
+    """删除采购订单"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        cur.execute('SELECT status FROM purchase_orders WHERE id = ?', (order_id,))
+        order = cur.fetchone()
+        
+        if not order:
+            conn.close()
+            return jsonify({'success': False, 'message': '采购单不存在'}), 404
+        
+        if order[0] not in ['待确认', '已取消']:
+            conn.close()
+            return jsonify({'success': False, 'message': f'订单状态为"{order[0]}"，不允许删除'}), 400
+        
+        cur.execute('DELETE FROM purchase_order_items WHERE order_id = ?', (order_id,))
+        cur.execute('DELETE FROM purchase_orders WHERE id = ?', (order_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': '删除成功'})
+        
+    except Exception as e:
+        logger.error(f"删除采购单失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/purchase_orders/export', methods=['GET'])
+@login_required
+def export_purchase_orders():
+    """导出采购订单"""
+    try:
+        import io
+        from datetime import datetime
+        
+        search_order_code = request.args.get('order_code', '').strip()
+        search_supplier = request.args.get('supplier', '').strip()
+        search_status = request.args.get('status', '').strip()
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        where_conditions = []
+        params = []
+        
+        if search_order_code:
+            where_conditions.append("o.order_code LIKE ?")
+            params.append(f'%{search_order_code}%')
+        
+        if search_supplier:
+            where_conditions.append("o.supplier_name LIKE ?")
+            params.append(f'%{search_supplier}%')
+        
+        if search_status:
+            where_conditions.append("o.status = ?")
+            params.append(search_status)
+        
+        where_clause = ' AND '.join(where_conditions) if where_conditions else '1=1'
+        
+        cur.execute(f'''
+            SELECT 
+                o.order_code, o.supplier_name, o.order_date, o.expected_date,
+                o.status, i.product_name, i.category, i.specification,
+                i.quantity, i.unit, i.price, i.amount, o.remarks
+            FROM purchase_orders o
+            LEFT JOIN purchase_order_items i ON o.id = i.order_id
+            WHERE {where_clause}
+            ORDER BY o.create_time DESC, i.id
+        ''', params)
+        
+        rows = cur.fetchall()
+        conn.close()
+        
+        import pandas as pd
+        df = pd.DataFrame(rows, columns=[
+            '采购单号', '供应商名称', '采购日期', '预计到货', '订单状态',
+            '商品名称', '类别', '规格', '数量', '单位', '单价', '金额', '备注'
+        ])
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='采购订单')
+            worksheet = writer.sheets['采购订单']
+            worksheet.column_dimensions['A'].width = 18
+            worksheet.column_dimensions['B'].width = 20
+            worksheet.column_dimensions['F'].width = 25
+        
+        output.seek(0)
+        filename = f'采购订单_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+        
+        from flask import send_file
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        logger.error(f"导出采购订单失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @app.route('/api/sales_orders/<int:order_id>/print', methods=['GET'])
