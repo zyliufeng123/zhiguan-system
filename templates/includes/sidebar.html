@@ -1,55 +1,178 @@
-<div class="col-md-2">
-    <div class="card">
-        <div class="list-group list-group-flush">
-            <a href="/dashboard" class="list-group-item list-group-item-action {% if request.path == '/dashboard' %}active{% endif %}">
-                <i class="bi bi-speedometer2"></i> 首页
+<aside class="sidebar">
+    <div class="px-3">
+        <!-- Logo/品牌 -->
+        <div class="text-center mb-4">
+            <a href="{{ url_for('dashboard') }}" class="text-decoration-none">
+                <h3 class="text-white mb-0">
+                    <i class="fas fa-chart-line me-2"></i>智管系统
+                </h3>
             </a>
-            
-            <a href="/customers" class="list-group-item list-group-item-action {% if request.path == '/customers' %}active{% endif %}">
-                <i class="bi bi-people"></i> 客户管理
-            </a>
-            
-            <a href="/suppliers" class="list-group-item list-group-item-action {% if request.path == '/suppliers' %}active{% endif %}">
-                <i class="bi bi-building"></i> 供应商管理
-            </a>
-            
-<li class="nav-item">
-    <a class="nav-link" href="/purchase_orders">
-        <i class="bi bi-bag-check"></i> 采购订单管理
-    </a>
-</li>
-
-<li class="nav-item">
-    <a class="nav-link" href="/picking_labels">
-        <i class="bi bi-tags"></i> 分拣标签管理
-    </a>
-</li>
-
-<li class="nav-item">
-    <a class="nav-link" href="/inventory">
-        <i class="bi bi-box-seam"></i> 库存管理
-    </a>
-</li>
-
-            <a href="/sales_orders" class="list-group-item list-group-item-action {% if request.path == '/sales_orders' %}active{% endif %}">
-                <i class="bi bi-cart-check"></i> 销售订单
-            </a>
-            
-            <a href="/purchase_orders" class="list-group-item list-group-item-action {% if request.path == '/purchase_orders' %}active{% endif %}">
-                <i class="bi bi-bag-check"></i> 采购订单
-            </a>
-            
-            <a href="/smart_quote" class="list-group-item list-group-item-action {% if request.path == '/smart_quote' %}active{% endif %}">
-                <i class="bi bi-calculator"></i> 智能报价
-            </a>
-            
-            <a href="/calculation_analysis" class="list-group-item list-group-item-action {% if request.path == '/calculation_analysis' %}active{% endif %}">
-                <i class="bi bi-graph-up"></i> 计算分析
-            </a>
-            
-            <a href="/settings" class="list-group-item list-group-item-action {% if request.path == '/settings' %}active{% endif %}">
-                <i class="bi bi-gear"></i> 系统设置
-            </a>
+            <small class="text-white-50">Intelligent Management</small>
         </div>
+
+        <hr class="bg-light">
+
+        <!-- 导航菜单 -->
+        <ul class="nav flex-column">
+            <!-- 首页 -->
+            <li class="nav-item mb-2">
+                <a class="nav-link text-white {{ 'active' if request.endpoint == 'dashboard' else '' }}" 
+                   href="{{ url_for('dashboard') }}">
+                    <i class="fas fa-home me-2"></i>首页
+                </a>
+            </li>
+
+            <!-- 智能报价 -->
+            <li class="nav-item mb-2">
+                <a class="nav-link text-white {{ 'active' if request.endpoint in ['smart_quote', 'smart_quote_bulk'] else '' }}" 
+                   href="{{ url_for('smart_quote') }}">
+                    <i class="fas fa-calculator me-2"></i>智能报价
+                </a>
+            </li>
+
+            <!-- 客户管理 -->
+            <li class="nav-item mb-2">
+                <a class="nav-link text-white {{ 'active' if request.endpoint == 'customers_page' else '' }}" 
+                   href="{{ url_for('customers_page') }}">
+                    <i class="fas fa-users me-2"></i>客户管理
+                </a>
+            </li>
+
+            <!-- 供应商管理 -->
+            <li class="nav-item mb-2">
+                <a class="nav-link text-white {{ 'active' if request.endpoint == 'suppliers_page' else '' }}" 
+                   href="{{ url_for('suppliers_page') }}">
+                    <i class="fas fa-truck me-2"></i>供应商管理
+                </a>
+            </li>
+
+            <!-- 销售订单 -->
+            <li class="nav-item mb-2">
+                <a class="nav-link text-white {{ 'active' if request.endpoint == 'sales_orders_page' else '' }}" 
+                   href="{{ url_for('sales_orders_page') }}">
+                    <i class="fas fa-file-invoice-dollar me-2"></i>销售订单
+                </a>
+            </li>
+
+            <!-- 采购订单 -->
+            <li class="nav-item mb-2">
+                <a class="nav-link text-white {{ 'active' if request.endpoint == 'purchase_orders_page' else '' }}" 
+                   href="{{ url_for('purchase_orders_page') }}">
+                    <i class="fas fa-shopping-cart me-2"></i>采购订单
+                </a>
+            </li>
+
+            <!-- 库存管理 -->
+            <li class="nav-item mb-2">
+                <a class="nav-link text-white {{ 'active' if request.endpoint == 'inventory' else '' }}" 
+                   href="{{ url_for('inventory') }}">
+                    <i class="fas fa-boxes-stacked me-2"></i>库存管理
+                </a>
+            </li>
+
+            <!-- 分拣标签 -->
+            <li class="nav-item mb-2">
+                <a class="nav-link text-white {{ 'active' if request.endpoint == 'picking_labels_page' else '' }}" 
+                   href="{{ url_for('picking_labels_page') }}">
+                    <i class="fas fa-tags me-2"></i>分拣标签
+                </a>
+            </li>
+
+            <hr class="bg-light my-3">
+
+            <!-- 计算分析 -->
+<li class="nav-item mb-2">
+    <a class="nav-link text-white {{ 'active' if request.path == '/calculation' else '' }}" 
+       href="/calculation">
+        <i class="fas fa-calculator me-2"></i>计算分析
+    </a>
+</li>
+
+            <!-- 透视报表 -->
+            <li class="nav-item mb-2">
+                <a class="nav-link text-white {{ 'active' if request.endpoint == 'pivot' else '' }}" 
+                   href="{{ url_for('pivot') }}">
+                    <i class="fas fa-chart-pie me-2"></i>透视报表
+                </a>
+            </li>
+
+            <!-- 公式编辑器 -->
+            <li class="nav-item mb-2">
+                <a class="nav-link text-white {{ 'active' if request.endpoint == 'formula' else '' }}" 
+                   href="{{ url_for('formula') }}">
+                    <i class="fas fa-code me-2"></i>公式编辑器
+                </a>
+            </li>
+
+            <hr class="bg-light my-3">
+
+            <!-- 系统设置 -->
+            <li class="nav-item mb-2">
+                <a class="nav-link text-white {{ 'active' if request.endpoint == 'settings' else '' }}" 
+                   href="{{ url_for('settings') }}">
+                    <i class="fas fa-cog me-2"></i>系统设置
+                </a>
+            </li>
+
+            <!-- 退出登录 -->
+            <li class="nav-item mb-2">
+                <a class="nav-link text-white" href="{{ url_for('logout') }}">
+                    <i class="fas fa-sign-out-alt me-2"></i>退出登录
+                </a>
+            </li>
+        </ul>
     </div>
-</div>
+</aside>
+
+<style>
+.sidebar .nav-link {
+    padding: 12px 20px;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.sidebar .nav-link:hover {
+    background: rgba(255, 255, 255, 0.1);
+    padding-left: 25px;
+}
+
+.sidebar .nav-link.active {
+    background: rgba(255, 255, 255, 0.2);
+    font-weight: bold;
+    border-left: 4px solid #28a745;
+}
+
+.sidebar .nav-link.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    width: 4px;
+    background: #28a745;
+}
+
+.sidebar hr {
+    opacity: 0.3;
+}
+
+/* 滚动条美化 */
+.sidebar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 3px;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.5);
+}
+</style>

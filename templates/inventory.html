@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>库存管理 - 智管订单系统</title>
+    <title>库存管理 - 智管系统</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css" rel="stylesheet">
     <style>
@@ -52,14 +52,13 @@
             color: white;
         }
         .search-box {
-            background: white;
-            border-radius: 8px;
+            background: #f8f9fa;
             padding: 20px;
+            border-radius: 8px;
             margin-bottom: 20px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
         }
         .table-hover tbody tr:hover {
-            background-color: #fff5f5;
+            background-color: #f8f9fa;
         }
         .stock-low { color: #dc3545; font-weight: bold; }
         .stock-normal { color: #28a745; font-weight: bold; }
@@ -71,18 +70,58 @@
         }
         .action-buttons .btn {
             margin-right: 5px;
-            padding: 5px 10px;
-            font-size: 0.875rem;
+            margin-bottom: 5px;
         }
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #999;
+        .pagination-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 20px;
         }
-        .empty-state i {
-            font-size: 64px;
-            color: #ddd;
+        .table thead th {
+            background-color: #f8f9fa;
+            font-weight: 600;
+            border-bottom: 2px solid #dee2e6;
+        }
+        .table tbody tr:hover {
+            background-color: #f8f9fa;
+        }
+        .stock-badge {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .stock-normal {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .stock-low {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .stock-out {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .stat-cards {
             margin-bottom: 20px;
+        }
+        .stat-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            text-align: center;
+        }
+        .stat-card h3 {
+            font-size: 32px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .stat-card p {
+            color: #666;
+            margin: 0;
         }
     </style>
 </head>
@@ -110,113 +149,113 @@
             <!-- 主内容区 -->
             <div class="col-md-10">
                 <!-- 统计卡片 -->
-                <div class="row">
+                <div class="row stat-cards">
                     <div class="col-md-3">
-                        <div class="stats-card stats-card-1">
-                            <p><i class="bi bi-box-seam"></i> 商品种类</p>
+                        <div class="stat-card">
+                            <i class="bi bi-box-seam text-primary" style="font-size: 36px;"></i>
                             <h3 id="totalProducts">0</h3>
-                            <small>种商品在库</small>
+                            <p>产品总数</p>
                         </div>
                     </div>
                     <div class="col-md-3">
-                        <div class="stats-card stats-card-2">
-                            <p><i class="bi bi-exclamation-triangle"></i> 库存预警</p>
-                            <h3 id="lowStockCount">0</h3>
-                            <small>低于安全库存</small>
+                        <div class="stat-card">
+                            <i class="bi bi-check-circle text-success" style="font-size: 36px;"></i>
+                            <h3 id="normalStock">0</h3>
+                            <p>库存正常</p>
                         </div>
                     </div>
                     <div class="col-md-3">
-                        <div class="stats-card stats-card-3">
-                            <p><i class="bi bi-arrow-down-circle"></i> 今日入库</p>
-                            <h3 id="todayInbound">0</h3>
-                            <small>笔入库记录</small>
+                        <div class="stat-card">
+                            <i class="bi bi-exclamation-triangle text-warning" style="font-size: 36px;"></i>
+                            <h3 id="lowStock">0</h3>
+                            <p>库存不足</p>
                         </div>
                     </div>
                     <div class="col-md-3">
-                        <div class="stats-card stats-card-4">
-                            <p><i class="bi bi-arrow-up-circle"></i> 今日出库</p>
-                            <h3 id="todayOutbound">0</h3>
-                            <small>笔出库记录</small>
+                        <div class="stat-card">
+                            <i class="bi bi-x-circle text-danger" style="font-size: 36px;"></i>
+                            <h3 id="outOfStock">0</h3>
+                            <p>缺货</p>
                         </div>
                     </div>
                 </div>
 
-                <!-- 搜索区域 -->
+                <!-- 搜索框 -->
                 <div class="search-box">
-                    <div class="row g-3 align-items-end">
+                    <form id="searchForm" class="row g-3">
                         <div class="col-md-3">
-                            <label class="form-label">商品名称</label>
-                            <input type="text" class="form-control" id="searchProduct" placeholder="输入商品名称">
+                            <label class="form-label">产品名称</label>
+                            <input type="text" class="form-control" id="searchName" placeholder="输入产品名称">
                         </div>
-                        <div class="col-md-2">
-                            <label class="form-label">商品类别</label>
-                            <select class="form-select" id="searchCategory">
-                                <option value="">全部类别</option>
-                            </select>
+                        <div class="col-md-3">
+                            <label class="form-label">产品编号</label>
+                            <input type="text" class="form-control" id="searchCode" placeholder="输入产品编号">
                         </div>
                         <div class="col-md-2">
                             <label class="form-label">库存状态</label>
-                            <select class="form-select" id="searchStockStatus">
+                            <select class="form-select" id="searchStatus">
                                 <option value="">全部状态</option>
-                                <option value="low">库存不足</option>
-                                <option value="warning">库存预警</option>
                                 <option value="normal">库存正常</option>
+                                <option value="low">库存不足</option>
+                                <option value="out">缺货</option>
                             </select>
                         </div>
-                        <div class="col-md-5">
-                            <button class="btn btn-orange" onclick="searchInventory()">
-                                <i class="bi bi-search"></i> 搜索
-                            </button>
-                            <button class="btn btn-secondary" onclick="resetSearch()">
-                                <i class="bi bi-arrow-counterclockwise"></i> 重置
-                            </button>
-                            <button class="btn btn-success" onclick="showInboundModal()">
-                                <i class="bi bi-box-arrow-in-down"></i> 入库
-                            </button>
-                            <button class="btn btn-warning" onclick="showOutboundModal()">
-                                <i class="bi bi-box-arrow-up"></i> 出库
-                            </button>
-                            <button class="btn btn-info text-white" onclick="showAddProductModal()">
-                                <i class="bi bi-plus-circle"></i> 新增商品
-                            </button>
+                        <div class="col-md-4">
+                            <label class="form-label">&nbsp;</label>
+                            <div>
+                                <button type="submit" class="btn btn-warning text-white">
+                                    <i class="bi bi-search"></i> 搜索
+                                </button>
+                                <button type="button" class="btn btn-secondary" onclick="resetSearch()">
+                                    <i class="bi bi-arrow-clockwise"></i> 重置
+                                </button>
+                            </div>
                         </div>
-                    </div>
+                    </form>
                 </div>
 
-                <!-- 数据表格 -->
-                <div class="card">
-                    <div class="card-header">
-                        <h5 class="mb-0">
-                            <i class="bi bi-box-seam-fill"></i> 库存列表
-                            <span class="badge bg-danger ms-2" id="totalCount">0</span>
-                        </h5>
+                <!-- 表格容器 -->
+                <div class="table-container">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>产品编号</th>
+                                    <th>产品名称</th>
+                                    <th>规格</th>
+                                    <th>单位</th>
+                                    <th>当前库存</th>
+                                    <th>安全库存</th>
+                                    <th>状态</th>
+                                    <th>更新时间</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="inventoryTableBody">
+                                <tr>
+                                    <td colspan="9" class="text-center">
+                                        <div class="spinner-border text-warning" role="status">
+                                            <span class="visually-hidden">加载中...</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
-                    <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-hover align-middle" id="inventoryTable">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th width="5%">序号</th>
-                                        <th width="15%">商品名称</th>
-                                        <th width="10%">类别</th>
-                                        <th width="12%">规格</th>
-                                        <th width="8%">当前库存</th>
-                                        <th width="8%">安全库存</th>
-                                        <th width="8%">单位</th>
-                                        <th width="10%">仓位</th>
-                                        <th width="10%">库存状态</th>
-                                        <th width="14%">操作</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="inventoryTableBody">
-                                    <!-- 数据通过JS动态加载 -->
-                                </tbody>
-                            </table>
-                        </div>
 
-                        <!-- 分页 -->
-                        <nav aria-label="Page navigation">
-                            <ul class="pagination justify-content-center" id="pagination">
+                    <!-- 分页信息 -->
+                    <div class="pagination-info">
+                        <div>
+                            <span id="recordInfo">共 0 条记录</span>
+                            <select class="form-select form-select-sm d-inline-block w-auto ms-2" id="pageSizeSelect" onchange="changePageSize()">
+                                <option value="10">10条/页</option>
+                                <option value="15" selected>15条/页</option>
+                                <option value="20">20条/页</option>
+                                <option value="50">50条/页</option>
+                            </select>
+                        </div>
+                        <nav>
+                            <ul class="pagination mb-0" id="pagination">
                             </ul>
                         </nav>
                     </div>
@@ -225,200 +264,184 @@
         </div>
     </div>
 
-    <!-- 新增商品模态框 -->
+    <!-- 新增产品模态框 -->
     <div class="modal fade" id="addProductModal" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">新增库存商品</h5>
+                    <h5 class="modal-title">
+                        <i class="bi bi-plus-circle"></i> 新增产品
+                    </h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <form id="addProductForm">
                         <div class="mb-3">
-                            <label class="form-label">商品名称 <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="productName" required>
+                            <label class="form-label">产品编号 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="product_code" required>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">商品类别</label>
-                            <input type="text" class="form-control" id="productCategory">
+                            <label class="form-label">产品名称 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="product_name" required>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">规格型号</label>
-                            <input type="text" class="form-control" id="productSpec">
+                            <label class="form-label">规格</label>
+                            <input type="text" class="form-control" name="specification">
                         </div>
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label class="form-label">初始库存</label>
-                                    <input type="number" class="form-control" id="initialStock" value="0" step="0.01">
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label class="form-label">安全库存</label>
-                                    <input type="number" class="form-control" id="safeStock" value="0" step="0.01">
-                                </div>
-                            </div>
+                        <div class="mb-3">
+                            <label class="form-label">单位</label>
+                            <input type="text" class="form-control" name="unit" placeholder="例如：件、箱、个">
                         </div>
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label class="form-label">单位</label>
-                                    <input type="text" class="form-control" id="productUnit" value="件">
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label class="form-label">仓位</label>
-                                    <input type="text" class="form-control" id="warehouseLocation">
-                                </div>
-                            </div>
+                        <div class="mb-3">
+                            <label class="form-label">初始库存</label>
+                            <input type="number" class="form-control" name="quantity" min="0" value="0">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">安全库存 <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" name="safety_stock" min="0" required>
+                            <small class="text-muted">库存低于此值时会提示预警</small>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">备注</label>
-                            <textarea class="form-control" id="productRemarks" rows="2"></textarea>
+                            <textarea class="form-control" name="note" rows="2"></textarea>
                         </div>
                     </form>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="button" class="btn btn-orange" onclick="addProduct()">确定添加</button>
+                    <button type="button" class="btn btn-warning text-white" onclick="addProduct()">保存</button>
                 </div>
             </div>
         </div>
     </div>
 
     <!-- 入库模态框 -->
-    <div class="modal fade" id="inboundModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+    <div class="modal fade" id="stockInModal" tabindex="-1">
+        <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">商品入库</h5>
+                    <h5 class="modal-title">
+                        <i class="bi bi-box-arrow-in-down"></i> 产品入库
+                    </h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <form id="inboundForm">
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label class="form-label">入库类型 <span class="text-danger">*</span></label>
-                                    <select class="form-select" id="inboundType" required>
-                                        <option value="采购入库">采购入库</option>
-                                        <option value="退货入库">退货入库</option>
-                                        <option value="调拨入库">调拨入库</option>
-                                        <option value="其他入库">其他入库</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label class="form-label">入库日期 <span class="text-danger">*</span></label>
-                                    <input type="date" class="form-control" id="inboundDate" required>
-                                </div>
-                            </div>
-                        </div>
+                    <form id="stockInForm">
+                        <input type="hidden" name="product_id" id="stockInProductId">
                         <div class="mb-3">
-                            <label class="form-label">选择商品 <span class="text-danger">*</span></label>
-                            <select class="form-select" id="inboundProduct" required>
-                                <option value="">请选择商品</option>
+                            <label class="form-label">产品名称</label>
+                            <select class="form-select" name="product_id" id="stockInProductSelect" required>
+                                <option value="">请选择产品</option>
                             </select>
                         </div>
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label class="form-label">入库数量 <span class="text-danger">*</span></label>
-                                    <input type="number" class="form-control" id="inboundQuantity" step="0.01" required>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label class="form-label">供应商</label>
-                                    <input type="text" class="form-control" id="inboundSupplier">
-                                </div>
-                            </div>
+                        <div class="mb-3">
+                            <label class="form-label">入库数量 <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" name="quantity" min="1" required>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">关联采购单号</label>
-                            <input type="text" class="form-control" id="inboundPurchaseOrder">
+                            <label class="form-label">入库日期</label>
+                            <input type="date" class="form-control" name="date" required>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">备注</label>
-                            <textarea class="form-control" id="inboundRemarks" rows="2"></textarea>
+                            <textarea class="form-control" name="note" rows="2"></textarea>
                         </div>
                     </form>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="button" class="btn btn-success" onclick="submitInbound()">确认入库</button>
+                    <button type="button" class="btn btn-success" onclick="saveStockIn()">确认入库</button>
                 </div>
             </div>
         </div>
     </div>
 
     <!-- 出库模态框 -->
-    <div class="modal fade" id="outboundModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+    <div class="modal fade" id="stockOutModal" tabindex="-1">
+        <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">商品出库</h5>
+                    <h5 class="modal-title">
+                        <i class="bi bi-box-arrow-up"></i> 产品出库
+                    </h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <form id="outboundForm">
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label class="form-label">出库类型 <span class="text-danger">*</span></label>
-                                    <select class="form-select" id="outboundType" required>
-                                        <option value="销售出库">销售出库</option>
-                                        <option value="调拨出库">调拨出库</option>
-                                        <option value="损耗出库">损耗出库</option>
-                                        <option value="其他出库">其他出库</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label class="form-label">出库日期 <span class="text-danger">*</span></label>
-                                    <input type="date" class="form-control" id="outboundDate" required>
-                                </div>
-                            </div>
-                        </div>
+                    <form id="stockOutForm">
                         <div class="mb-3">
-                            <label class="form-label">选择商品 <span class="text-danger">*</span></label>
-                            <select class="form-select" id="outboundProduct" required>
-                                <option value="">请选择商品</option>
+                            <label class="form-label">产品名称</label>
+                            <select class="form-select" name="product_id" id="stockOutProductSelect" required>
+                                <option value="">请选择产品</option>
                             </select>
                         </div>
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label class="form-label">出库数量 <span class="text-danger">*</span></label>
-                                    <input type="number" class="form-control" id="outboundQuantity" step="0.01" required>
-                                    <small class="text-muted">当前库存：<span id="currentStockDisplay">0</span></small>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label class="form-label">客户名称</label>
-                                    <input type="text" class="form-control" id="outboundCustomer">
-                                </div>
-                            </div>
+                        <div class="mb-3">
+                            <label class="form-label">出库数量 <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" name="quantity" min="1" required>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">关联销售单号</label>
-                            <input type="text" class="form-control" id="outboundSalesOrder">
+                            <label class="form-label">出库日期</label>
+                            <input type="date" class="form-control" name="date" required>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">备注</label>
-                            <textarea class="form-control" id="outboundRemarks" rows="2"></textarea>
+                            <textarea class="form-control" name="note" rows="2"></textarea>
                         </div>
                     </form>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="button" class="btn btn-warning" onclick="submitOutbound()">确认出库</button>
+                    <button type="button" class="btn btn-danger" onclick="saveStockOut()">确认出库</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 编辑产品模态框 -->
+    <div class="modal fade" id="editProductModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-pencil-square"></i> 编辑产品
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editProductForm">
+                        <input type="hidden" name="id" id="editProductId">
+                        <div class="mb-3">
+                            <label class="form-label">产品编号 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="product_code" id="editProductCode" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">产品名称 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="product_name" id="editProductName" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">规格</label>
+                            <input type="text" class="form-control" name="specification" id="editProductSpec">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">单位</label>
+                            <input type="text" class="form-control" name="unit" id="editProductUnit">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">当前库存</label>
+                            <input type="number" class="form-control" name="quantity" id="editProductQuantity" min="0">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">安全库存 <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" name="safety_stock" id="editProductSafetyStock" min="0" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">备注</label>
+                            <textarea class="form-control" name="note" id="editProductNote" rows="2"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-warning text-white" onclick="updateProduct()">保存</button>
                 </div>
             </div>
         </div>
@@ -428,389 +451,361 @@
     <script>
         let currentPage = 1;
         let pageSize = 15;
-        let addProductModal, inboundModal, outboundModal;
+        let totalRecords = 0;
 
+        // 页面加载时获取数据
         document.addEventListener('DOMContentLoaded', function() {
-            addProductModal = new bootstrap.Modal(document.getElementById('addProductModal'));
-            inboundModal = new bootstrap.Modal(document.getElementById('inboundModal'));
-            outboundModal = new bootstrap.Modal(document.getElementById('outboundModal'));
-            
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('inboundDate').value = today;
-            document.getElementById('outboundDate').value = today;
-            
             loadInventory();
-            loadStatistics();
-            loadCategories();
+            loadProductsForSelect();
+            
+            // 设置默认日期为今天
+            const today = new Date().toISOString().split('T')[0];
+            document.querySelector('#stockInForm input[name="date"]').value = today;
+            document.querySelector('#stockOutForm input[name="date"]').value = today;
+            
+            // 搜索表单提交
+            document.getElementById('searchForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                currentPage = 1;
+                loadInventory();
+            });
         });
 
-        function loadInventory(page = 1) {
-            currentPage = page;
-            const searchProduct = document.getElementById('searchProduct').value;
-            const searchCategory = document.getElementById('searchCategory').value;
-            const searchStockStatus = document.getElementById('searchStockStatus').value;
-
-            const params = new URLSearchParams({
-                page: page,
-                page_size: pageSize,
-                product_name: searchProduct,
-                category: searchCategory,
-                stock_status: searchStockStatus
-            });
-
-            fetch(`/api/inventory?${params}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        renderTable(data.data.items);
-                        renderPagination(data.data.total, data.data.page, data.data.page_size);
-                        document.getElementById('totalCount').textContent = data.data.total;
-                    } else {
-                        showError('加载失败：' + data.message);
-                    }
-                })
-                .catch(error => {
-                    console.error('加载错误:', error);
-                    showError('网络错误：' + error.message);
-                });
+        // 加载库存列表
+        async function loadInventory() {
+            const name = document.getElementById('searchName').value;
+            const code = document.getElementById('searchCode').value;
+            const status = document.getElementById('searchStatus').value;
+            
+            try {
+                const response = await fetch(`/api/inventory?page=${currentPage}&page_size=${pageSize}&name=${name}&code=${code}&status=${status}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayInventory(data.data);
+                    totalRecords = data.total;
+                    updatePagination(data.total);
+                    updateStatistics(data.statistics);
+                } else {
+                    alert(data.message || '加载失败');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('加载失败，请重试');
+            }
         }
 
-        function renderTable(items) {
+        // 显示库存列表
+        function displayInventory(products) {
             const tbody = document.getElementById('inventoryTableBody');
             
-            if (items.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="10">
-                            <div class="empty-state">
-                                <i class="bi bi-inbox"></i>
-                                <p>暂无库存数据</p>
-                            </div>
-                        </td>
-                    </tr>
-                `;
+            if (products.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">暂无数据</td></tr>';
                 return;
             }
-
-            tbody.innerHTML = items.map((item, index) => {
-                const stockClass = getStockClass(item.current_stock, item.safe_stock);
-                const stockStatus = getStockStatus(item.current_stock, item.safe_stock);
+            
+            tbody.innerHTML = products.map(product => {
+                let statusClass = 'stock-normal';
+                let statusText = '库存正常';
+                
+                if (product.quantity === 0) {
+                    statusClass = 'stock-out';
+                    statusText = '缺货';
+                } else if (product.quantity <= product.safety_stock) {
+                    statusClass = 'stock-low';
+                    statusText = '库存不足';
+                }
                 
                 return `
-                    <tr>
-                        <td>${(currentPage - 1) * pageSize + index + 1}</td>
-                        <td><strong>${item.product_name}</strong></td>
-                        <td><span class="badge-category bg-info">${item.category || '-'}</span></td>
-                        <td>${item.specification || '-'}</td>
-                        <td class="${stockClass}">${item.current_stock}</td>
-                        <td>${item.safe_stock}</td>
-                        <td>${item.unit}</td>
-                        <td>${item.warehouse_location || '-'}</td>
-                        <td>${stockStatus}</td>
-                        <td class="action-buttons">
-                            <button class="btn btn-sm btn-outline-success" onclick="quickInbound(${item.id})" title="快速入库">
-                                <i class="bi bi-box-arrow-in-down"></i>
-                            </button>
-                            <button class="btn btn-sm btn-outline-warning" onclick="quickOutbound(${item.id})" title="快速出库">
-                                <i class="bi bi-box-arrow-up"></i>
-                            </button>
-                        </td>
-                    </tr>
+                <tr>
+                    <td><strong>${product.product_code || '-'}</strong></td>
+                    <td>${product.product_name || '-'}</td>
+                    <td>${product.specification || '-'}</td>
+                    <td>${product.unit || '-'}</td>
+                    <td><strong>${product.quantity || 0}</strong></td>
+                    <td>${product.safety_stock || 0}</td>
+                    <td><span class="stock-badge ${statusClass}">${statusText}</span></td>
+                    <td>${product.updated_at || '-'}</td>
+                    <td class="action-buttons">
+                        <button class="btn btn-sm btn-primary" onclick="editProduct(${product.id})">
+                            <i class="bi bi-pencil"></i> 编辑
+                        </button>
+                        <button class="btn btn-sm btn-info text-white" onclick="viewHistory(${product.id})">
+                            <i class="bi bi-clock-history"></i> 记录
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteProduct(${product.id})">
+                            <i class="bi bi-trash"></i> 删除
+                        </button>
+                    </td>
+                </tr>
                 `;
             }).join('');
         }
 
-        function getStockClass(current, safe) {
-            if (current <= 0) return 'stock-low';
-            if (current <= safe) return 'stock-warning';
-            return 'stock-normal';
-        }
-
-        function getStockStatus(current, safe) {
-            if (current <= 0) return '<span class="badge bg-danger">缺货</span>';
-            if (current <= safe) return '<span class="badge bg-warning">预警</span>';
-            return '<span class="badge bg-success">正常</span>';
-        }
-
-        function loadStatistics() {
-            fetch('/api/inventory/statistics')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        document.getElementById('totalProducts').textContent = data.data.total_products;
-                        document.getElementById('lowStockCount').textContent = data.data.low_stock_count;
-                        document.getElementById('todayInbound').textContent = data.data.today_inbound;
-                        document.getElementById('todayOutbound').textContent = data.data.today_outbound;
-                    }
-                })
-                .catch(error => console.error('统计加载失败:', error));
-        }
-
-        function loadCategories() {
-            fetch('/api/inventory/categories')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        const select = document.getElementById('searchCategory');
-                        select.innerHTML = '<option value="">全部类别</option>';
-                        data.data.forEach(cat => {
-                            select.innerHTML += `<option value="${cat}">${cat}</option>`;
-                        });
-                    }
-                })
-                .catch(error => console.error('类别加载失败:', error));
-        }
-
-        function showAddProductModal() {
-            document.getElementById('addProductForm').reset();
-            addProductModal.show();
-        }
-
-        function addProduct() {
-            const productName = document.getElementById('productName').value.trim();
-            if (!productName) {
-                showError('请输入商品名称');
-                return;
+        // 更新统计数据
+        function updateStatistics(stats) {
+            if (stats) {
+                document.getElementById('totalProducts').textContent = stats.total || 0;
+                document.getElementById('normalStock').textContent = stats.normal || 0;
+                document.getElementById('lowStock').textContent = stats.low || 0;
+                document.getElementById('outOfStock').textContent = stats.out || 0;
             }
+        }
 
-            const data = {
-                product_name: productName,
-                category: document.getElementById('productCategory').value,
-                specification: document.getElementById('productSpec').value,
-                current_stock: parseFloat(document.getElementById('initialStock').value) || 0,
-                safe_stock: parseFloat(document.getElementById('safeStock').value) || 0,
-                unit: document.getElementById('productUnit').value,
-                warehouse_location: document.getElementById('warehouseLocation').value,
-                remarks: document.getElementById('productRemarks').value
-            };
-
-            fetch('/api/inventory', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(data)
-            })
-            .then(response => response.json())
-            .then(data => {
+        // 加载产品列表到下拉框
+        async function loadProductsForSelect() {
+            try {
+                const response = await fetch('/api/inventory/products');
+                const data = await response.json();
+                
                 if (data.success) {
-                    showSuccess('商品添加成功');
-                    addProductModal.hide();
-                    loadInventory(currentPage);
-                    loadStatistics();
-                } else {
-                    showError(data.message);
+                    const stockInSelect = document.getElementById('stockInProductSelect');
+                    const stockOutSelect = document.getElementById('stockOutProductSelect');
+                    
+                    const options = data.data.map(p => 
+                        `<option value="${p.id}">${p.product_name} (${p.product_code})</option>`
+                    ).join('');
+                    
+                    stockInSelect.innerHTML = '<option value="">请选择产品</option>' + options;
+                    stockOutSelect.innerHTML = '<option value="">请选择产品</option>' + options;
                 }
-            })
-            .catch(error => {
-                console.error('添加失败:', error);
-                showError('添加失败：' + error.message);
-            });
-        }
-
-        function showInboundModal() {
-            document.getElementById('inboundForm').reset();
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('inboundDate').value = today;
-            loadProductsForSelect('inboundProduct');
-            inboundModal.show();
-        }
-
-        function showOutboundModal() {
-            document.getElementById('outboundForm').reset();
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('outboundDate').value = today;
-            loadProductsForSelect('outboundProduct');
-            outboundModal.show();
-        }
-
-        function loadProductsForSelect(selectId) {
-            fetch('/api/inventory?page=1&page_size=1000')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        const select = document.getElementById(selectId);
-                        select.innerHTML = '<option value="">请选择商品</option>';
-                        data.data.items.forEach(item => {
-                            const text = `${item.product_name}${item.specification ? ' (' + item.specification + ')' : ''}`;
-                            select.innerHTML += `<option value="${item.id}" data-stock="${item.current_stock}">${text}</option>`;
-                        });
-                    }
-                })
-                .catch(error => console.error('商品加载失败:', error));
-        }
-
-        document.addEventListener('DOMContentLoaded', function() {
-            const outboundProduct = document.getElementById('outboundProduct');
-            if (outboundProduct) {
-                outboundProduct.addEventListener('change', function() {
-                    const selectedOption = this.options[this.selectedIndex];
-                    const stock = selectedOption.getAttribute('data-stock') || 0;
-                    document.getElementById('currentStockDisplay').textContent = stock;
-                });
+            } catch (error) {
+                console.error('Error:', error);
             }
-        });
-
-        function submitInbound() {
-            const productId = document.getElementById('inboundProduct').value;
-            if (!productId) {
-                showError('请选择商品');
-                return;
-            }
-
-            const quantity = parseFloat(document.getElementById('inboundQuantity').value);
-            if (!quantity || quantity <= 0) {
-                showError('请输入有效的入库数量');
-                return;
-            }
-
-            const data = {
-                product_id: productId,
-                inbound_type: document.getElementById('inboundType').value,
-                quantity: quantity,
-                inbound_date: document.getElementById('inboundDate').value,
-                supplier_name: document.getElementById('inboundSupplier').value,
-                purchase_order_code: document.getElementById('inboundPurchaseOrder').value,
-                remarks: document.getElementById('inboundRemarks').value
-            };
-
-            fetch('/api/inventory/inbound', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(data)
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    showSuccess('入库成功');
-                    inboundModal.hide();
-                    loadInventory(currentPage);
-                    loadStatistics();
-                } else {
-                    showError(data.message);
-                }
-            })
-            .catch(error => {
-                console.error('入库失败:', error);
-                showError('入库失败：' + error.message);
-            });
         }
 
-        function submitOutbound() {
-            const productId = document.getElementById('outboundProduct').value;
-            if (!productId) {
-                showError('请选择商品');
-                return;
-            }
-
-            const quantity = parseFloat(document.getElementById('outboundQuantity').value);
-            if (!quantity || quantity <= 0) {
-                showError('请输入有效的出库数量');
-                return;
-            }
-
-            const data = {
-                product_id: productId,
-                outbound_type: document.getElementById('outboundType').value,
-                quantity: quantity,
-                outbound_date: document.getElementById('outboundDate').value,
-                customer_name: document.getElementById('outboundCustomer').value,
-                sales_order_code: document.getElementById('outboundSalesOrder').value,
-                remarks: document.getElementById('outboundRemarks').value
-            };
-
-            fetch('/api/inventory/outbound', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(data)
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    showSuccess('出库成功');
-                    outboundModal.hide();
-                    loadInventory(currentPage);
-                    loadStatistics();
-                } else {
-                    showError(data.message);
-                }
-            })
-            .catch(error => {
-                console.error('出库失败:', error);
-                showError('出库失败：' + error.message);
-            });
-        }
-
-        function quickInbound(productId) {
-            document.getElementById('inboundForm').reset();
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('inboundDate').value = today;
-            loadProductsForSelect('inboundProduct');
-            setTimeout(() => {
-                document.getElementById('inboundProduct').value = productId;
-                inboundModal.show();
-            }, 200);
-        }
-
-        function quickOutbound(productId) {
-            document.getElementById('outboundForm').reset();
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('outboundDate').value = today;
-            loadProductsForSelect('outboundProduct');
-            setTimeout(() => {
-                document.getElementById('outboundProduct').value = productId;
-                const selectedOption = document.getElementById('outboundProduct').options[document.getElementById('outboundProduct').selectedIndex];
-                const stock = selectedOption.getAttribute('data-stock') || 0;
-                document.getElementById('currentStockDisplay').textContent = stock;
-                outboundModal.show();
-            }, 200);
-        }
-
-        function renderPagination(total, page, pageSize) {
+        // 更新分页
+        function updatePagination(total) {
             const totalPages = Math.ceil(total / pageSize);
             const pagination = document.getElementById('pagination');
+            const recordInfo = document.getElementById('recordInfo');
             
-            if (totalPages <= 1) {
-                pagination.innerHTML = '';
-                return;
-            }
-
-            let html = `<li class="page-item ${page === 1 ? 'disabled' : ''}">
-                           <a class="page-link" href="#" onclick="loadInventory(${page - 1}); return false;">上一页</a>
-                        </li>`;
+            recordInfo.textContent = `共 ${total} 条记录`;
+            
+            let html = '';
+            
+            html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="changePage(${currentPage - 1}); return false;">上一页</a>
+            </li>`;
             
             for (let i = 1; i <= totalPages; i++) {
-                if (i === 1 || i === totalPages || (i >= page - 2 && i <= page + 2)) {
-                    html += `<li class="page-item ${i === page ? 'active' : ''}">
-                                <a class="page-link" href="#" onclick="loadInventory(${i}); return false;">${i}</a>
-                             </li>`;
-                } else if (i === page - 3 || i === page + 3) {
+                if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
+                    html += `<li class="page-item ${i === currentPage ? 'active' : ''}">
+                        <a class="page-link" href="#" onclick="changePage(${i}); return false;">${i}</a>
+                    </li>`;
+                } else if (i === currentPage - 3 || i === currentPage + 3) {
                     html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
                 }
             }
             
-            html += `<li class="page-item ${page === totalPages ? 'disabled' : ''}">
-                        <a class="page-link" href="#" onclick="loadInventory(${page + 1}); return false;">下一页</a>
-                     </li>`;
+            html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="changePage(${currentPage + 1}); return false;">下一页</a>
+            </li>`;
             
             pagination.innerHTML = html;
         }
 
-        function searchInventory() {
-            loadInventory(1);
+        // 切换页码
+        function changePage(page) {
+            const totalPages = Math.ceil(totalRecords / pageSize);
+            if (page < 1 || page > totalPages) return;
+            currentPage = page;
+            loadInventory();
         }
 
+        // 改变每页显示数量
+        function changePageSize() {
+            pageSize = parseInt(document.getElementById('pageSizeSelect').value);
+            currentPage = 1;
+            loadInventory();
+        }
+
+        // 重置搜索
         function resetSearch() {
-            document.getElementById('searchProduct').value = '';
-            document.getElementById('searchCategory').value = '';
-            document.getElementById('searchStockStatus').value = '';
-            loadInventory(1);
+            document.getElementById('searchName').value = '';
+            document.getElementById('searchCode').value = '';
+            document.getElementById('searchStatus').value = '';
+            currentPage = 1;
+            loadInventory();
         }
 
-        function showSuccess(message) {
-            alert('✅ ' + message);
+        // 新增产品
+        async function addProduct() {
+            const form = document.getElementById('addProductForm');
+            const formData = new FormData(form);
+            
+            try {
+                const response = await fetch('/api/inventory', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(Object.fromEntries(formData))
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('新增成功');
+                    bootstrap.Modal.getInstance(document.getElementById('addProductModal')).hide();
+                    form.reset();
+                    loadInventory();
+                    loadProductsForSelect();
+                } else {
+                    alert(data.message || '新增失败');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('新增失败，请重试');
+            }
         }
 
-        function showError(message) {
-            alert('❌ ' + message);
+        // 入库
+        async function saveStockIn() {
+            const form = document.getElementById('stockInForm');
+            const formData = new FormData(form);
+            
+            try {
+                const response = await fetch('/api/inventory/stock-in', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(Object.fromEntries(formData))
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('入库成功');
+                    bootstrap.Modal.getInstance(document.getElementById('stockInModal')).hide();
+                    form.reset();
+                    loadInventory();
+                } else {
+                    alert(data.message || '入库失败');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('入库失败，请重试');
+            }
+        }
+
+        // 出库
+        async function saveStockOut() {
+            const form = document.getElementById('stockOutForm');
+            const formData = new FormData(form);
+            
+            try {
+                const response = await fetch('/api/inventory/stock-out', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(Object.fromEntries(formData))
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('出库成功');
+                    bootstrap.Modal.getInstance(document.getElementById('stockOutModal')).hide();
+                    form.reset();
+                    loadInventory();
+                } else {
+                    alert(data.message || '出库失败');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('出库失败，请重试');
+            }
+        }
+
+        // 编辑产品
+        async function editProduct(id) {
+            try {
+                const response = await fetch(`/api/inventory/${id}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const product = data.data;
+                    document.getElementById('editProductId').value = product.id;
+                    document.getElementById('editProductCode').value = product.product_code || '';
+                    document.getElementById('editProductName').value = product.product_name || '';
+                    document.getElementById('editProductSpec').value = product.specification || '';
+                    document.getElementById('editProductUnit').value = product.unit || '';
+                    document.getElementById('editProductQuantity').value = product.quantity || 0;
+                    document.getElementById('editProductSafetyStock').value = product.safety_stock || 0;
+                    document.getElementById('editProductNote').value = product.note || '';
+                    
+                    new bootstrap.Modal(document.getElementById('editProductModal')).show();
+                } else {
+                    alert(data.message || '获取数据失败');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('获取数据失败，请重试');
+            }
+        }
+
+        // 更新产品
+        async function updateProduct() {
+            const form = document.getElementById('editProductForm');
+            const formData = new FormData(form);
+            const id = formData.get('id');
+            
+            try {
+                const response = await fetch(`/api/inventory/${id}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(Object.fromEntries(formData))
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('更新成功');
+                    bootstrap.Modal.getInstance(document.getElementById('editProductModal')).hide();
+                    loadInventory();
+                    loadProductsForSelect();
+                } else {
+                    alert(data.message || '更新失败');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('更新失败，请重试');
+            }
+        }
+
+        // 查看历史记录
+        function viewHistory(id) {
+            alert('历史记录功能开发中...');
+            // 可以跳转到历史记录页面或显示模态框
+        }
+
+        // 删除产品
+        async function deleteProduct(id) {
+            if (!confirm('确定要删除这个产品吗？')) return;
+            
+            try {
+                const response = await fetch(`/api/inventory/${id}`, {
+                    method: 'DELETE'
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('删除成功');
+                    loadInventory();
+                    loadProductsForSelect();
+                } else {
+                    alert(data.message || '删除失败');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('删除失败，请重试');
+            }
         }
     </script>
 </body>

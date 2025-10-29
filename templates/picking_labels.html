@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>分拣标签管理 - 智管订单系统</title>
+    <title>分拣标签管理 - 智管系统</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css" rel="stylesheet">
     <style>
@@ -42,11 +42,10 @@
             background-color: #fff5f5;
         }
         .search-box {
-            background: white;
-            border-radius: 8px;
+            background: #f8f9fa;
             padding: 20px;
+            border-radius: 8px;
             margin-bottom: 20px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
         }
         .badge-code {
             background: #ffe0e0;
@@ -65,15 +64,21 @@
         .status-completed { background: #d1ecf1; color: #0c5460; }
         .action-buttons .btn {
             margin-right: 5px;
-            padding: 5px 10px;
-            font-size: 0.875rem;
+            margin-bottom: 5px;
         }
-        .label-item {
-            padding: 15px;
-            border: 1px solid #dee2e6;
-            margin-bottom: 10px;
-            border-radius: 5px;
-            background: #f8f9fa;
+        .pagination-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 20px;
+        }
+        .table thead th {
+            background-color: #f8f9fa;
+            font-weight: 600;
+            border-bottom: 2px solid #dee2e6;
+        }
+        .table tbody tr:hover {
+            background-color: #f8f9fa;
         }
         .empty-state {
             text-align: center;
@@ -136,36 +141,24 @@
                 <!-- 搜索区域 -->
                 <div class="search-box">
                     <div class="row g-3 align-items-end">
-                        <div class="col-md-3">
-                            <label class="form-label">标签编号</label>
-                            <input type="text" class="form-control" id="searchLabelCode" placeholder="输入标签编号">
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label">订单编号</label>
-                            <input type="text" class="form-control" id="searchOrderCode" placeholder="输入订单编号">
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label">标签状态</label>
-                            <select class="form-select" id="searchStatus">
-                                <option value="">全部状态</option>
-                                <option value="待打印">待打印</option>
-                                <option value="已打印">已打印</option>
-                                <option value="已完成">已完成</option>
-                            </select>
+                        <div class="col-md-4">
+                            <label class="form-label">标签名称</label>
+                            <input type="text" class="form-control" id="searchName" placeholder="输入标签名称">
                         </div>
                         <div class="col-md-4">
-                            <button class="btn btn-orange" onclick="searchLabels()">
-                                <i class="bi bi-search"></i> 搜索
-                            </button>
-                            <button class="btn btn-secondary" onclick="resetSearch()">
-                                <i class="bi bi-arrow-counterclockwise"></i> 重置
-                            </button>
-                            <button class="btn btn-primary" onclick="showGenerateModal()">
-                                <i class="bi bi-plus-circle"></i> 生成标签
-                            </button>
-                            <button class="btn btn-success" onclick="batchPrint()">
-                                <i class="bi bi-printer"></i> 批量打印
-                            </button>
+                            <label class="form-label">标签编号</label>
+                            <input type="text" class="form-control" id="searchCode" placeholder="输入标签编号">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">&nbsp;</label>
+                            <div>
+                                <button type="submit" class="btn text-white" style="background-color: #20B2AA;">
+                                    <i class="bi bi-search"></i> 搜索
+                                </button>
+                                <button type="button" class="btn btn-secondary" onclick="resetSearch()">
+                                    <i class="bi bi-arrow-clockwise"></i> 重置
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -183,17 +176,11 @@
                             <table class="table table-hover align-middle" id="labelTable">
                                 <thead class="table-light">
                                     <tr>
-                                        <th width="5%">
-                                            <input type="checkbox" id="selectAll" onchange="toggleSelectAll()">
-                                        </th>
                                         <th width="12%">标签编号</th>
-                                        <th width="12%">订单编号</th>
-                                        <th width="12%">客户名称</th>
-                                        <th width="15%">商品名称</th>
-                                        <th width="8%">数量</th>
-                                        <th width="10%">交货日期</th>
+                                        <th width="12%">标签名称</th>
+                                        <th width="12%">类型</th>
                                         <th width="8%">状态</th>
-                                        <th width="8%">打印次数</th>
+                                        <th width="10%">创建时间</th>
                                         <th width="10%">操作</th>
                                     </tr>
                                 </thead>
@@ -203,64 +190,114 @@
                             </table>
                         </div>
 
-                        <!-- 分页 -->
-                        <nav aria-label="Page navigation">
-                            <ul class="pagination justify-content-center" id="pagination">
-                            </ul>
-                        </nav>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 生成标签模态框 -->
-    <div class="modal fade" id="generateModal" tabindex="-1">
-        <div class="modal-dialog modal-xl">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">从销售订单生成标签</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">选择销售订单</label>
-                        <select class="form-select" id="selectOrder" onchange="loadOrderItems()">
-                            <option value="">请选择订单</option>
-                        </select>
-                    </div>
-
-                    <div id="orderItemsContainer" style="display: none;">
-                        <h6>订单明细（选择需要生成标签的商品）：</h6>
-                        <div id="orderItemsList">
-                            <!-- 订单明细列表 -->
+                        <!-- 分页信息 -->
+                        <div class="pagination-info">
+                            <div>
+                                <span id="recordInfo">共 0 条记录</span>
+                                <select class="form-select form-select-sm d-inline-block w-auto ms-2" id="pageSizeSelect" onchange="changePageSize()">
+                                    <option value="10">10条/页</option>
+                                    <option value="15" selected>15条/页</option>
+                                    <option value="20">20条/页</option>
+                                    <option value="50">50条/页</option>
+                                </select>
+                            </div>
+                            <nav>
+                                <ul class="pagination mb-0" id="pagination">
+                                </ul>
+                            </nav>
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新增标签模态框 -->
+    <div class="modal fade" id="addLabelModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-plus-circle"></i> 新增标签
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addLabelForm">
+                        <div class="mb-3">
+                            <label class="form-label">标签编号 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="label_code" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">标签名称 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="label_name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">类型</label>
+                            <input type="text" class="form-control" name="type">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">状态</label>
+                            <select class="form-select" name="status">
+                                <option value="enabled">启用</option>
+                                <option value="disabled">禁用</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">备注</label>
+                            <textarea class="form-control" name="note" rows="2"></textarea>
+                        </div>
+                    </form>
+                </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="button" class="btn btn-orange" onclick="generateLabels()">生成标签</button>
+                    <button type="button" class="btn text-white" style="background-color: #20B2AA;" onclick="addLabel()">保存</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- 打印预览模态框 -->
-    <div class="modal fade" id="printModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+    <!-- 编辑标签模态框 -->
+    <div class="modal fade" id="editLabelModal" tabindex="-1">
+        <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">标签打印预览</h5>
+                    <h5 class="modal-title">
+                        <i class="bi bi-pencil-square"></i> 编辑标签
+                    </h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body" id="printContent">
-                    <!-- 打印内容 -->
+                <div class="modal-body">
+                    <form id="editLabelForm">
+                        <input type="hidden" name="id" id="editLabelId">
+                        <div class="mb-3">
+                            <label class="form-label">标签编号 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="label_code" id="editLabelCode" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">标签名称 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="label_name" id="editLabelName" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">类型</label>
+                            <input type="text" class="form-control" name="type" id="editLabelType">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">状态</label>
+                            <select class="form-select" name="status" id="editLabelStatus">
+                                <option value="enabled">启用</option>
+                                <option value="disabled">禁用</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">备注</label>
+                            <textarea class="form-control" name="note" id="editLabelNote" rows="2"></textarea>
+                        </div>
+                    </form>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="button" class="btn btn-primary" onclick="doPrint()">
-                        <i class="bi bi-printer"></i> 打印
-                    </button>
+                    <button type="button" class="btn text-white" style="background-color: #20B2AA;" onclick="updateLabel()">保存</button>
                 </div>
             </div>
         </div>
@@ -270,339 +307,233 @@
     <script>
         let currentPage = 1;
         let pageSize = 15;
-        let generateModal, printModal;
-        let selectedLabels = [];
-        let currentOrderItems = [];
+        let totalRecords = 0;
 
+        // 页面加载时获取数据
         document.addEventListener('DOMContentLoaded', function() {
-            generateModal = new bootstrap.Modal(document.getElementById('generateModal'));
-            printModal = new bootstrap.Modal(document.getElementById('printModal'));
             loadLabels();
+            
+            // 搜索表单提交
+            document.getElementById('searchForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                currentPage = 1;
+                loadLabels();
+            });
         });
 
-        function loadLabels(page = 1) {
-            currentPage = page;
-            const searchLabelCode = document.getElementById('searchLabelCode').value;
-            const searchOrderCode = document.getElementById('searchOrderCode').value;
-            const searchStatus = document.getElementById('searchStatus').value;
-
-            const params = new URLSearchParams({
-                page: page,
-                page_size: pageSize,
-                label_code: searchLabelCode,
-                order_code: searchOrderCode,
-                status: searchStatus
-            });
-
-            fetch(`/api/picking_labels?${params}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        renderTable(data.data.items, data.data.page, data.data.page_size);
-                        renderPagination(data.data.total, data.data.page, data.data.page_size);
-                        document.getElementById('totalCount').textContent = data.data.total;
-                    } else {
-                        showError('加载失败：' + data.message);
-                    }
-                })
-                .catch(error => {
-                    showError('网络错误：' + error.message);
-                });
+        // 加载标签列表
+        async function loadLabels() {
+            const name = document.getElementById('searchName').value;
+            const code = document.getElementById('searchCode').value;
+            
+            try {
+                const response = await fetch(`/api/picking_labels?page=${currentPage}&page_size=${pageSize}&name=${name}&code=${code}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayLabels(data.data);
+                    totalRecords = data.total;
+                    updatePagination(data.total);
+                } else {
+                    alert(data.message || '加载失败');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('加载失败，请重试');
+            }
         }
 
-        function renderTable(items, page, pageSize) {
+        // 显示标签列表
+        function displayLabels(labels) {
             const tbody = document.getElementById('labelTableBody');
             
-            if (items.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="10">
-                            <div class="empty-state">
-                                <i class="bi bi-inbox"></i>
-                                <p>暂无标签数据</p>
-                            </div>
-                        </td>
-                    </tr>
-                `;
+            if (labels.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">暂无数据</td></tr>';
                 return;
             }
-
-            tbody.innerHTML = items.map((item, index) => {
-                const statusClass = getStatusClass(item.label_status);
+            
+            tbody.innerHTML = labels.map(label => {
+                const statusText = label.status === 'enabled' ? '启用' : '禁用';
                 return `
-                    <tr>
-                        <td><input type="checkbox" class="label-checkbox" value="${item.id}"></td>
-                        <td><span class="badge-code">${item.label_code}</span></td>
-                        <td>${item.order_code}</td>
-                        <td><strong>${item.customer_name}</strong></td>
-                        <td>${item.product_name}${item.specification ? '<br><small>' + item.specification + '</small>' : ''}</td>
-                        <td><strong>${item.quantity} ${item.unit}</strong></td>
-                        <td>${formatDate(item.delivery_date)}</td>
-                        <td><span class="badge-status ${statusClass}">${item.label_status}</span></td>
-                        <td><span class="badge bg-info">${item.print_count}</span></td>
-                        <td class="action-buttons">
-                            <button class="btn btn-sm btn-outline-primary" onclick="printLabel(${item.id})">
-                                <i class="bi bi-printer"></i>
-                            </button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="deleteLabel(${item.id})">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        </td>
-                    </tr>
+                <tr>
+                    <td><strong>${label.label_code || '-'}</strong></td>
+                    <td>${label.label_name || '-'}</td>
+                    <td>${label.type || '-'}</td>
+                    <td>${statusText}</td>
+                    <td>${label.created_at || '-'}</td>
+                    <td class="action-buttons">
+                        <button class="btn btn-sm btn-primary" onclick="editLabel(${label.id})">
+                            <i class="bi bi-pencil"></i> 编辑
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteLabel(${label.id})">
+                            <i class="bi bi-trash"></i> 删除
+                        </button>
+                    </td>
+                </tr>
                 `;
             }).join('');
         }
 
-        function getStatusClass(status) {
-            const statusMap = {
-                '待打印': 'status-pending',
-                '已打印': 'status-printed',
-                '已完成': 'status-completed'
-            };
-            return statusMap[status] || 'status-pending';
-        }
-
-        function renderPagination(total, page, pageSize) {
+        // 更新分页
+        function updatePagination(total) {
             const totalPages = Math.ceil(total / pageSize);
             const pagination = document.getElementById('pagination');
+            const recordInfo = document.getElementById('recordInfo');
             
-            if (totalPages <= 1) {
-                pagination.innerHTML = '';
-                return;
-            }
-
-            let html = `<li class="page-item ${page === 1 ? 'disabled' : ''}">
-                           <a class="page-link" href="#" onclick="loadLabels(${page - 1}); return false;">上一页</a>
-                        </li>`;
+            recordInfo.textContent = `共 ${total} 条记录`;
+            
+            let html = '';
+            
+            html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="changePage(${currentPage - 1}); return false;">上一页</a>
+            </li>`;
             
             for (let i = 1; i <= totalPages; i++) {
-                if (i === 1 || i === totalPages || (i >= page - 2 && i <= page + 2)) {
-                    html += `<li class="page-item ${i === page ? 'active' : ''}">
-                                <a class="page-link" href="#" onclick="loadLabels(${i}); return false;">${i}</a>
-                             </li>`;
-                } else if (i === page - 3 || i === page + 3) {
+                if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
+                    html += `<li class="page-item ${i === currentPage ? 'active' : ''}">
+                        <a class="page-link" href="#" onclick="changePage(${i}); return false;">${i}</a>
+                    </li>`;
+                } else if (i === currentPage - 3 || i === currentPage + 3) {
                     html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
                 }
             }
             
-            html += `<li class="page-item ${page === totalPages ? 'disabled' : ''}">
-                        <a class="page-link" href="#" onclick="loadLabels(${page + 1}); return false;">下一页</a>
-                     </li>`;
+            html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="changePage(${currentPage + 1}); return false;">下一页</a>
+            </li>`;
             
             pagination.innerHTML = html;
         }
 
-        function showGenerateModal() {
-            fetch('/api/sales_orders?page=1&page_size=1000')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        const select = document.getElementById('selectOrder');
-                        select.innerHTML = '<option value="">请选择订单</option>';
-                        data.data.items.forEach(order => {
-                            select.innerHTML += `<option value="${order.id}">${order.order_code} - ${order.customer_name}</option>`;
-                        });
-                        generateModal.show();
-                    }
-                });
+        // 切换页码
+        function changePage(page) {
+            const totalPages = Math.ceil(totalRecords / pageSize);
+            if (page < 1 || page > totalPages) return;
+            currentPage = page;
+            loadLabels();
         }
 
-        function loadOrderItems() {
-            const orderId = document.getElementById('selectOrder').value;
-            if (!orderId) {
-                document.getElementById('orderItemsContainer').style.display = 'none';
-                return;
-            }
-
-            fetch(`/api/sales_orders/${orderId}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        currentOrderItems = data.data.items;
-                        renderOrderItems(data.data.items);
-                        document.getElementById('orderItemsContainer').style.display = 'block';
-                    }
-                });
+        // 改变每页显示数量
+        function changePageSize() {
+            pageSize = parseInt(document.getElementById('pageSizeSelect').value);
+            currentPage = 1;
+            loadLabels();
         }
 
-        function renderOrderItems(items) {
-            const container = document.getElementById('orderItemsList');
-            container.innerHTML = items.map((item, index) => `
-                <div class="label-item">
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" value="${index}" id="item_${index}" checked>
-                        <label class="form-check-label" for="item_${index}">
-                            <strong>${item.product_name}</strong>
-                            ${item.specification ? '<span class="text-muted">（' + item.specification + '）</span>' : ''}
-                            - 数量：<span class="text-danger">${item.quantity} ${item.unit}</span>
-                        </label>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        function generateLabels() {
-            const orderId = document.getElementById('selectOrder').value;
-            if (!orderId) {
-                showError('请选择订单');
-                return;
-            }
-
-            const selectedIndexes = [];
-            document.querySelectorAll('#orderItemsList input[type="checkbox"]:checked').forEach(cb => {
-                selectedIndexes.push(parseInt(cb.value));
-            });
-
-            if (selectedIndexes.length === 0) {
-                showError('请至少选择一个商品');
-                return;
-            }
-
-            const selectedItems = selectedIndexes.map(i => currentOrderItems[i]);
-
-            fetch('/api/picking_labels/generate', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    order_id: orderId,
-                    items: selectedItems
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    showSuccess(`成功生成 ${data.count} 个标签`);
-                    generateModal.hide();
-                    loadLabels(currentPage);
-                } else {
-                    showError(data.message);
-                }
-            })
-            .catch(error => {
-                showError('生成失败：' + error.message);
-            });
-        }
-
-        function printLabel(labelId) {
-            fetch(`/api/picking_labels/${labelId}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        showPrintPreview([data.data]);
-                    }
-                });
-        }
-
-        function batchPrint() {
-            const checkboxes = document.querySelectorAll('.label-checkbox:checked');
-            if (checkboxes.length === 0) {
-                showError('请选择要打印的标签');
-                return;
-            }
-
-            const labelIds = Array.from(checkboxes).map(cb => cb.value);
-            
-            Promise.all(labelIds.map(id => 
-                fetch(`/api/picking_labels/${id}`).then(r => r.json())
-            )).then(results => {
-                const labels = results.filter(r => r.success).map(r => r.data);
-                showPrintPreview(labels);
-            });
-        }
-
-        function showPrintPreview(labels) {
-            const printContent = document.getElementById('printContent');
-            printContent.innerHTML = labels.map(label => `
-                <div class="print-label">
-                    <div style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 10px;">
-                        ${label.customer_name}
-                    </div>
-                    <div style="border-top: 2px solid #000; padding-top: 10px;">
-                        <div style="font-size: 14px; margin-bottom: 5px;">
-                            <strong>订单号：</strong>${label.order_code}
-                        </div>
-                        <div style="font-size: 16px; font-weight: bold; margin: 10px 0;">
-                            ${label.product_name}
-                        </div>
-                        ${label.specification ? '<div style="font-size: 12px; color: #666; margin-bottom: 5px;">规格：' + label.specification + '</div>' : ''}
-                        <div style="font-size: 24px; font-weight: bold; color: #d32f2f; margin: 10px 0;">
-                            数量：${label.quantity} ${label.unit}
-                        </div>
-                        <div style="font-size: 12px; color: #666;">
-                            交货日期：${formatDate(label.delivery_date)}
-                        </div>
-                        <div style="font-size: 10px; color: #999; margin-top: 10px; text-align: right;">
-                            ${label.label_code}
-                        </div>
-                    </div>
-                </div>
-            `).join('');
-            
-            printModal.show();
-        }
-
-        function doPrint() {
-            window.print();
-            
-            const checkboxes = document.querySelectorAll('.label-checkbox:checked');
-            const labelIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
-            
-            if (labelIds.length > 0) {
-                fetch('/api/picking_labels/mark_printed', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({label_ids: labelIds})
-                })
-                .then(() => loadLabels(currentPage));
-            }
-            
-            printModal.hide();
-        }
-
-        function deleteLabel(labelId) {
-            if (!confirm('确定要删除这个标签吗？')) return;
-
-            fetch(`/api/picking_labels/${labelId}`, {method: 'DELETE'})
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        showSuccess('删除成功');
-                        loadLabels(currentPage);
-                    } else {
-                        showError(data.message);
-                    }
-                });
-        }
-
-        function toggleSelectAll() {
-            const selectAll = document.getElementById('selectAll').checked;
-            document.querySelectorAll('.label-checkbox').forEach(cb => {
-                cb.checked = selectAll;
-            });
-        }
-
-        function searchLabels() {
-            loadLabels(1);
-        }
-
+        // 重置搜索
         function resetSearch() {
-            document.getElementById('searchLabelCode').value = '';
-            document.getElementById('searchOrderCode').value = '';
-            document.getElementById('searchStatus').value = '';
-            loadLabels(1);
+            document.getElementById('searchName').value = '';
+            document.getElementById('searchCode').value = '';
+            currentPage = 1;
+            loadLabels();
         }
 
-        function formatDate(date) {
-            if (!date) return '-';
-            return date.substring(0, 10);
+        // 新增标签
+        async function addLabel() {
+            const form = document.getElementById('addLabelForm');
+            const formData = new FormData(form);
+            
+            try {
+                const response = await fetch('/api/picking_labels', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(Object.fromEntries(formData))
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('新增成功');
+                    bootstrap.Modal.getInstance(document.getElementById('addLabelModal')).hide();
+                    form.reset();
+                    loadLabels();
+                } else {
+                    alert(data.message || '新增失败');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('新增失败，请重试');
+            }
         }
 
-        function showSuccess(message) {
-            alert('✅ ' + message);
+        // 编辑标签
+        async function editLabel(id) {
+            try {
+                const response = await fetch(`/api/picking_labels/${id}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const label = data.data;
+                    document.getElementById('editLabelId').value = label.id;
+                    document.getElementById('editLabelCode').value = label.label_code || '';
+                    document.getElementById('editLabelName').value = label.label_name || '';
+                    document.getElementById('editLabelType').value = label.type || '';
+                    document.getElementById('editLabelStatus').value = label.status || 'enabled';
+                    document.getElementById('editLabelNote').value = label.note || '';
+                    
+                    new bootstrap.Modal(document.getElementById('editLabelModal')).show();
+                } else {
+                    alert(data.message || '获取数据失败');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('获取数据失败，请重试');
+            }
         }
 
-        function showError(message) {
-            alert('❌ ' + message);
+        // 更新标签
+        async function updateLabel() {
+            const form = document.getElementById('editLabelForm');
+            const formData = new FormData(form);
+            const id = formData.get('id');
+            
+            try {
+                const response = await fetch(`/api/picking_labels/${id}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(Object.fromEntries(formData))
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('更新成功');
+                    bootstrap.Modal.getInstance(document.getElementById('editLabelModal')).hide();
+                    loadLabels();
+                } else {
+                    alert(data.message || '更新失败');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('更新失败，请重试');
+            }
+        }
+
+        // 删除标签
+        async function deleteLabel(id) {
+            if (!confirm('确定要删除这个标签吗？')) return;
+            
+            try {
+                const response = await fetch(`/api/picking_labels/${id}`, {
+                    method: 'DELETE'
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('删除成功');
+                    loadLabels();
+                } else {
+                    alert(data.message || '删除失败');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('删除失败，请重试');
+            }
         }
     </script>
 </body>

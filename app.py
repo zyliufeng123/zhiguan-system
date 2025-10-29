@@ -770,7 +770,7 @@ def formula():
         conn.close()
     return render_template('formula.html')
 
-@app.route('/calculation_analysis')
+@app.route('/calculation')
 @login_required
 def calculation_analysis():
     # 获取所有公司名称（用于下拉选择）
@@ -781,33 +781,6 @@ def calculation_analysis():
     return render_template('calculation_analysis.html', companies=companies)
 
 # ========== 订单模块（含 JSON API） ==========
-@app.route('/order')
-@login_required
-def order():
-    conn = get_db()
-    type_filter = request.args.get('type', '')
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
-    customer_filter = request.args.get('customer', '')
-    status_filter = request.args.get('status', '')
-    query = 'SELECT * FROM orders WHERE 1=1'
-    params = []
-    if type_filter:
-        query += ' AND type = ?'; params.append(type_filter)
-    if date_from:
-        query += ' AND date >= ?'; params.append(date_from)
-    if date_to:
-        query += ' AND date <= ?'; params.append(date_to)
-    if customer_filter:
-        query += ' AND customer LIKE ?'; params.append(f'%{customer_filter}%')
-    if status_filter:
-        query += ' AND status = ?'; params.append(status_filter)
-    orders = conn.execute(query, params).fetchall()
-    types = [('销售','销售'), ('采购','采购')]
-    statuses = [('待确认','待确认'), ('已确认','已确认'), ('完成','完成')]
-    customers = conn.execute('SELECT id, name FROM customers').fetchall()
-    conn.close()
-    return render_template('order.html', orders=orders, types=types, statuses=statuses, customers=customers, current_date=datetime.now().strftime('%Y-%m-%d'))
 
 @app.route('/order/data')
 @login_required
@@ -872,39 +845,6 @@ def delete_order(oid):
     conn.close()
     flash('订单删除成功')
     return redirect(url_for('order'))
-
-@app.route('/order/bulk', methods=['GET','POST'])
-@login_required
-def order_bulk():
-    if request.method == 'POST':
-        if pd is None:
-            flash('缺少 pandas，无法处理文件')
-            return redirect(url_for('order_bulk'))
-        file = request.files.get('file')
-        if not file:
-            flash('未选中文件')
-            return redirect(url_for('order_bulk'))
-        try:
-            if file.filename.lower().endswith('.csv'):
-                df = pd.read_csv(file)
-            else:
-                df = pd.read_excel(file)
-            conn = get_db()
-            imported = 0
-            for _, r in df.iterrows():
-                customer_name = r.get('customer') or r.get('客户') or ''
-                conn.execute('INSERT OR IGNORE INTO customers (name) VALUES (?)', (customer_name,))
-                conn.execute('INSERT INTO orders (type, customer, date, total_price, status) VALUES (?, ?, ?, ?, ?)',
-                             (r.get('type'), customer_name, r.get('date'), r.get('total_price') or 0, r.get('status')))
-                imported += 1
-            conn.commit()
-            conn.close()
-            flash(f'成功导入 {imported} 订单')
-            return redirect(url_for('order'))
-        except Exception as e:
-            logger.exception("order bulk 错误")
-            flash(f'导入失败: {e}')
-    return render_template('order_bulk.html')
 
 # ========== 整体导航/错误处理（新增，确保页面不丢） ==========
 @app.errorhandler(404)
@@ -4613,7 +4553,7 @@ def generate_record_code(record_type):
     return f'{prefix}{new_num:04d}'
 
 
-@app.route('/inventory')
+@app.route('/inventory', endpoint='inventory')
 @login_required
 def inventory_page():
     """库存管理页面"""
