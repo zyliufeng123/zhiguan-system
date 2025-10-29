@@ -1,731 +1,527 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>采购订单管理 - 智管系统</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css" rel="stylesheet">
-    <style>
-        body {
-            background-color: #f8f9fa;
-            font-family: 'Microsoft YaHei', Arial, sans-serif;
-        }
-        .navbar {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        .content-wrapper {
-            margin-top: 20px;
-        }
-        .card {
-            border: none;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-        }
-        .card-header {
-            background: white;
-            border-bottom: 2px solid #f0f0f0;
-            padding: 20px;
-        }
-        .btn-purple {
-            background: linear-gradient(135deg, #9966FF 0%, #7a47cc 100%);
-            border: none;
-            color: white;
-        }
-        .btn-purple:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(153, 102, 255, 0.4);
-            color: white;
-        }
-        .table-hover tbody tr:hover {
-            background-color: #f9f5ff;
-        }
-        .search-box {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
-        .badge-code {
-            background: #f3e5f5;
-            color: #6a1b9a;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9em;
-            padding: 5px 10px;
-        }
-        .badge-status {
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 0.85em;
-        }
-        .status-pending { background: #fff3cd; color: #856404; }
-        .status-confirmed { background: #cfe2ff; color: #084298; }
-        .status-received { background: #d1e7dd; color: #0f5132; }
-        .status-completed { background: #d1ecf1; color: #0c5460; }
-        .status-cancelled { background: #f8d7da; color: #842029; }
-        .action-buttons .btn {
-            margin-right: 5px;
-            margin-bottom: 5px;
-        }
-        .pagination-info {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-top: 20px;
-        }
-        .table thead th {
-            background-color: #f8f9fa;
-            font-weight: 600;
-            border-bottom: 2px solid #dee2e6;
-        }
-        .table tbody tr:hover {
-            background-color: #f8f9fa;
-        }
-        .status-badge {
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-        .status-pending {
-            background-color: #fff3cd;
-            color: #856404;
-        }
-        .status-ordered {
-            background-color: #cfe2ff;
-            color: #084298;
-        }
-        .status-received {
-            background-color: #d1e7dd;
-            color: #0f5132;
-        }
-        .status-cancelled {
-            background-color: #f8d7da;
-            color: #721c24;
-        }
-        .order-items-table {
-            margin-top: 15px;
-        }
-        .order-items-table th {
-            background-color: #e9ecef;
-        }
-    </style>
-</head>
-<body>
-    <!-- 导航栏 -->
-    <nav class="navbar navbar-dark">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="/dashboard">
-                <i class="bi bi-bag-check"></i> 智管订单系统
-            </a>
-            <div class="d-flex">
-                <span class="navbar-text text-white me-3">
-                    <i class="bi bi-person-circle"></i> {{ session.user }}
-                </span>
-                <a href="/logout" class="btn btn-outline-light btn-sm">退出</a>
+{% extends "includes/base_with_sidebar.html" %}
+
+{% block title %}采购订单 - 智管系统{% endblock %}
+
+{% block head %}
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css" rel="stylesheet">
+<style>
+    .table-container {
+        background: white;
+        border-radius: 10px;
+        padding: 25px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+    }
+    .search-box {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+    }
+    .action-buttons .btn {
+        margin-right: 5px;
+        margin-bottom: 5px;
+    }
+    .pagination-info {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 20px;
+    }
+    .table thead th {
+        background-color: #f8f9fa;
+        font-weight: 600;
+        border-bottom: 2px solid #dee2e6;
+    }
+    .table tbody tr:hover {
+        background-color: #f8f9fa;
+    }
+    .status-badge {
+        padding: 5px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 500;
+    }
+    .status-pending {
+        background-color: #fff3cd;
+        color: #856404;
+    }
+    .status-confirmed {
+        background-color: #cfe2ff;
+        color: #084298;
+    }
+    .status-received {
+        background-color: #d1e7dd;
+        color: #0f5132;
+    }
+    .status-completed {
+        background-color: #d1e7dd;
+        color: #0a3622;
+    }
+    .status-cancelled {
+        background-color: #f8d7da;
+        color: #842029;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- 页面标题 -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>
+            <i class="bi bi-cart-plus-fill text-danger"></i> 采购订单
+        </h2>
+        <button class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#addOrderModal">
+            <i class="bi bi-plus-circle"></i> 新增订单
+        </button>
+    </div>
+
+    <!-- 搜索框 -->
+    <div class="search-box">
+        <form id="searchForm" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">订单编号</label>
+                <input type="text" class="form-control" id="searchOrderNo" placeholder="输入订单编号">
             </div>
+            <div class="col-md-3">
+                <label class="form-label">供应商名称</label>
+                <input type="text" class="form-control" id="searchSupplier" placeholder="输入供应商名称">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">订单状态</label>
+                <select class="form-select" id="searchStatus">
+                    <option value="">全部状态</option>
+                    <option value="pending">待确认</option>
+                    <option value="confirmed">已确认</option>
+                    <option value="received">已收货</option>
+                    <option value="completed">已完成</option>
+                    <option value="cancelled">已取消</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">&nbsp;</label>
+                <div>
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-search"></i> 搜索
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="resetSearch()">
+                        <i class="bi bi-arrow-clockwise"></i> 重置
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- 表格容器 -->
+    <div class="table-container">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>订单编号</th>
+                        <th>供应商名称</th>
+                        <th>订单日期</th>
+                        <th>预计到货日期</th>
+                        <th>订单金额</th>
+                        <th>状态</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="orderTableBody">
+                    <tr>
+                        <td colspan="8" class="text-center">
+                            <div class="spinner-border text-danger" role="status">
+                                <span class="visually-hidden">加载中...</span>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
-    </nav>
 
-    <div class="container-fluid content-wrapper">
-        <div class="row">
-            <!-- 引入统一侧边栏 -->
-            {% include 'includes/sidebar.html' %}
+        <!-- 分页信息 -->
+        <div class="pagination-info">
+            <div>
+                <span id="recordInfo">共 0 条记录</span>
+                <select class="form-select form-select-sm d-inline-block w-auto ms-2" id="pageSizeSelect" onchange="changePageSize()">
+                    <option value="10">10条/页</option>
+                    <option value="15" selected>15条/页</option>
+                    <option value="20">20条/页</option>
+                    <option value="50">50条/页</option>
+                </select>
+            </div>
+            <nav>
+                <ul class="pagination mb-0" id="pagination"></ul>
+            </nav>
+        </div>
+    </div>
+</div>
 
-            <!-- 主内容区 -->
-            <div class="col-md-10">
-                <!-- 搜索区域 -->
-                <div class="search-box">
-                    <div class="row g-3 align-items-end">
-                        <div class="col-md-3">
-                            <label class="form-label">采购单号</label>
-                            <input type="text" class="form-control" id="searchOrderNo" placeholder="输入采购单号">
+<!-- 新增订单模态框 -->
+<div class="modal fade" id="addOrderModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-plus-circle"></i> 新增采购订单</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addOrderForm">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">订单编号 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="order_no" required>
                         </div>
-                        <div class="col-md-3">
-                            <label class="form-label">供应商名称</label>
-                            <input type="text" class="form-control" id="searchSupplier" placeholder="输入供应商名称">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">供应商名称 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="supplier_name" required>
                         </div>
-                        <div class="col-md-2">
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">订单日期 <span class="text-danger">*</span></label>
+                            <input type="date" class="form-control" name="order_date" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">预计到货日期</label>
+                            <input type="date" class="form-control" name="expected_date">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">订单金额 <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" name="total_amount" step="0.01" min="0" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
                             <label class="form-label">订单状态</label>
-                            <select class="form-select" id="searchStatus">
-                                <option value="">全部状态</option>
-                                <option value="pending">待处理</option>
-                                <option value="ordered">已下单</option>
+                            <select class="form-select" name="status">
+                                <option value="pending">待确认</option>
+                                <option value="confirmed">已确认</option>
                                 <option value="received">已收货</option>
+                                <option value="completed">已完成</option>
                                 <option value="cancelled">已取消</option>
                             </select>
                         </div>
-                        <div class="col-md-4">
-                            <button class="btn btn-purple" onclick="searchOrders()">
-                                <i class="bi bi-search"></i> 搜索
-                            </button>
-                            <button class="btn btn-secondary" onclick="resetSearch()">
-                                <i class="bi bi-arrow-counterclockwise"></i> 重置
-                            </button>
-                            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addPurchaseOrderModal">
-                                <i class="bi bi-plus-circle"></i> 新增采购单
-                            </button>
-                            <button class="btn btn-success" onclick="exportExcel()">
-                                <i class="bi bi-file-earmark-excel"></i> 导出
-                            </button>
-                        </div>
                     </div>
-                </div>
-
-                <!-- 数据表格 -->
-                <div class="card">
-                    <div class="card-header">
-                        <h5 class="mb-0">
-                            <i class="bi bi-bag-check-fill"></i> 采购订单列表
-                            <span class="badge bg-purple ms-2" id="totalCount" style="background-color: #9966FF;">0</span>
-                        </h5>
+                    <div class="mb-3">
+                        <label class="form-label">备注</label>
+                        <textarea class="form-control" name="note" rows="3"></textarea>
                     </div>
-                    <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-hover align-middle" id="orderTable">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>采购单号</th>
-                                        <th>供应商名称</th>
-                                        <th>采购日期</th>
-                                        <th>总金额</th>
-                                        <th>状态</th>
-                                        <th>创建时间</th>
-                                        <th>操作</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="purchaseOrderTableBody">
-                                    <!-- 数据通过JS动态加载 -->
-                                </tbody>
-                            </table>
-                        </div>
-
-                        <!-- 分页信息 -->
-                        <div class="pagination-info">
-                            <div>
-                                <span id="recordInfo">共 0 条记录</span>
-                                <select class="form-select form-select-sm d-inline-block w-auto ms-2" id="pageSizeSelect" onchange="changePageSize()">
-                                    <option value="10">10条/页</option>
-                                    <option value="15" selected>15条/页</option>
-                                    <option value="20">20条/页</option>
-                                    <option value="50">50条/页</option>
-                                </select>
-                            </div>
-                            <nav>
-                                <ul class="pagination mb-0" id="pagination">
-                                </ul>
-                            </nav>
-                        </div>
-                    </div>
-                </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-danger" onclick="addOrder()">保存</button>
             </div>
         </div>
     </div>
+</div>
 
-    <!-- 新增采购订单模态框 -->
-    <div class="modal fade" id="addPurchaseOrderModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">
-                        <i class="bi bi-plus-circle"></i> 新增采购订单
-                    </h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="addPurchaseOrderForm">
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">采购单号 <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control" name="order_no" required>
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">供应商名称 <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control" name="supplier_name" required>
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">采购日期 <span class="text-danger">*</span></label>
-                                <input type="date" class="form-control" name="order_date" required>
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">预计到货日期</label>
-                                <input type="date" class="form-control" name="expected_date">
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">订单状态</label>
-                                <select class="form-select" name="status">
-                                    <option value="pending">待处理</option>
-                                    <option value="ordered">已下单</option>
-                                    <option value="received">已收货</option>
-                                    <option value="cancelled">已取消</option>
-                                </select>
-                            </div>
-                            <div class="col-md-12 mb-3">
-                                <label class="form-label">备注</label>
-                                <textarea class="form-control" name="note" rows="2"></textarea>
-                            </div>
+<!-- 编辑订单模态框 -->
+<div class="modal fade" id="editOrderModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil-square"></i> 编辑采购订单</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editOrderForm">
+                    <input type="hidden" name="id" id="editOrderId">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">订单编号 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="order_no" id="editOrderNo" required>
                         </div>
-                        
-                        <!-- 采购明细 -->
-                        <div class="mb-3">
-                            <label class="form-label">采购明细</label>
-                            <table class="table table-sm order-items-table">
-                                <thead>
-                                    <tr>
-                                        <th>产品名称</th>
-                                        <th>采购数量</th>
-                                        <th>单价</th>
-                                        <th>金额</th>
-                                        <th>操作</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="purchaseItemsBody">
-                                    <tr>
-                                        <td>
-                                            <input type="text" class="form-control form-control-sm" placeholder="产品名称">
-                                        </td>
-                                        <td>
-                                            <input type="number" class="form-control form-control-sm" placeholder="数量" min="1">
-                                        </td>
-                                        <td>
-                                            <input type="number" class="form-control form-control-sm" placeholder="单价" min="0" step="0.01">
-                                        </td>
-                                        <td>
-                                            <span class="item-amount">0.00</span>
-                                        </td>
-                                        <td>
-                                            <button type="button" class="btn btn-sm btn-danger" onclick="removePurchaseItem(this)">
-                                                <i class="bi bi-trash"></i>
-                                            </button>
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                            <button type="button" class="btn btn-sm btn-secondary" onclick="addPurchaseItem()">
-                                <i class="bi bi-plus"></i> 添加明细
-                            </button>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">供应商名称 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="supplier_name" id="editSupplierName" required>
                         </div>
-                        
-                        <div class="text-end">
-                            <h5>采购总额：¥<span id="purchaseTotalAmount">0.00</span></h5>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">订单日期 <span class="text-danger">*</span></label>
+                            <input type="date" class="form-control" name="order_date" id="editOrderDate" required>
                         </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="button" class="btn text-white" style="background-color: #6f42c1;" onclick="savePurchaseOrder()">保存</button>
-                </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">预计到货日期</label>
+                            <input type="date" class="form-control" name="expected_date" id="editExpectedDate">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">订单金额 <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" name="total_amount" id="editTotalAmount" step="0.01" min="0" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">订单状态</label>
+                            <select class="form-select" name="status" id="editStatus">
+                                <option value="pending">待确认</option>
+                                <option value="confirmed">已确认</option>
+                                <option value="received">已收货</option>
+                                <option value="completed">已完成</option>
+                                <option value="cancelled">已取消</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">备注</label>
+                        <textarea class="form-control" name="note" id="editNote" rows="3"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-danger" onclick="updateOrder()">保存</button>
             </div>
         </div>
     </div>
+</div>
+{% endblock %}
 
-    <!-- 查看采购订单详情模态框 -->
-    <div class="modal fade" id="viewPurchaseOrderModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">
-                        <i class="bi bi-eye"></i> 采购订单详情
-                    </h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body" id="purchaseOrderDetailContent">
-                    <!-- 动态加载内容 -->
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
-                    <button type="button" class="btn btn-primary" onclick="printPurchaseOrder()">
-                        <i class="bi bi-printer"></i> 打印
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
+{% block scripts %}
+<script>
+let currentPage = 1;
+let pageSize = 15;
+let totalRecords = 0;
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        let currentPage = 1;
-        let pageSize = 15;
-        let totalRecords = 0;
-        let currentPurchaseOrderId = null;
+document.addEventListener('DOMContentLoaded', function() {
+    loadOrders();
+    
+    // 设置默认日期为今天
+    const today = new Date().toISOString().split('T')[0];
+    document.querySelector('#addOrderForm input[name="order_date"]').value = today;
+    
+    // 设置预计到货日期为7天后
+    const nextWeek = new Date();
+    nextWeek.setDate(nextWeek.getDate() + 7);
+    document.querySelector('#addOrderForm input[name="expected_date"]').value = nextWeek.toISOString().split('T')[0];
+    
+    document.getElementById('searchForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        currentPage = 1;
+        loadOrders();
+    });
+});
 
-        // 页面加载时获取数据
-        document.addEventListener('DOMContentLoaded', function() {
-            loadPurchaseOrders();
-            
-            // 搜索表单提交
-            document.getElementById('searchForm').addEventListener('submit', function(e) {
-                e.preventDefault();
-                currentPage = 1;
-                loadPurchaseOrders();
-            });
-            
-            // 监听采购明细输入变化
-            document.getElementById('purchaseItemsBody').addEventListener('input', calculatePurchaseTotal);
+async function loadOrders() {
+    const orderNo = document.getElementById('searchOrderNo').value;
+    const supplier = document.getElementById('searchSupplier').value;
+    const status = document.getElementById('searchStatus').value;
+    
+    try {
+        const response = await fetch(`/api/purchase_orders?page=${currentPage}&page_size=${pageSize}&order_no=${orderNo}&supplier=${supplier}&status=${status}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            displayOrders(data.data);
+            totalRecords = data.total;
+            updatePagination(data.total);
+        } else {
+            alert(data.message || '加载失败');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        document.getElementById('orderTableBody').innerHTML = '<tr><td colspan="8" class="text-center text-danger">加载失败，请重试</td></tr>';
+    }
+}
+
+function displayOrders(orders) {
+    const tbody = document.getElementById('orderTableBody');
+    
+    if (!Array.isArray(orders) || orders.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">暂无数据</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = orders.map(order => {
+        const statusMap = {
+            'pending': { text: '待确认', class: 'status-pending' },
+            'confirmed': { text: '已确认', class: 'status-confirmed' },
+            'received': { text: '已收货', class: 'status-received' },
+            'completed': { text: '已完成', class: 'status-completed' },
+            'cancelled': { text: '已取消', class: 'status-cancelled' }
+        };
+        const status = statusMap[order.status] || { text: order.status, class: 'status-pending' };
+        
+        return `
+        <tr>
+            <td><strong>${order.order_no || '-'}</strong></td>
+            <td>${order.supplier_name || '-'}</td>
+            <td>${order.order_date || '-'}</td>
+            <td>${order.expected_date || '-'}</td>
+            <td><strong class="text-danger">¥${parseFloat(order.total_amount || 0).toFixed(2)}</strong></td>
+            <td><span class="status-badge ${status.class}">${status.text}</span></td>
+            <td>${order.created_at || '-'}</td>
+            <td class="action-buttons">
+                <button class="btn btn-sm btn-primary" onclick="editOrder(${order.id})">
+                    <i class="bi bi-pencil"></i> 编辑
+                </button>
+                <button class="btn btn-sm btn-info text-white" onclick="viewDetails(${order.id})">
+                    <i class="bi bi-eye"></i> 详情
+                </button>
+                <button class="btn btn-sm btn-danger" onclick="deleteOrder(${order.id})">
+                    <i class="bi bi-trash"></i> 删除
+                </button>
+            </td>
+        </tr>
+        `;
+    }).join('');
+}
+
+function updatePagination(total) {
+    const totalPages = Math.ceil(total / pageSize);
+    const pagination = document.getElementById('pagination');
+    const recordInfo = document.getElementById('recordInfo');
+    
+    recordInfo.textContent = `共 ${total} 条记录`;
+    
+    let html = '';
+    html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="changePage(${currentPage - 1}); return false;">上一页</a>
+    </li>`;
+    
+    for (let i = 1; i <= totalPages; i++) {
+        if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
+            html += `<li class="page-item ${i === currentPage ? 'active' : ''}">
+                <a class="page-link" href="#" onclick="changePage(${i}); return false;">${i}</a>
+            </li>`;
+        } else if (i === currentPage - 3 || i === currentPage + 3) {
+            html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+        }
+    }
+    
+    html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="changePage(${currentPage + 1}); return false;">下一页</a>
+    </li>`;
+    
+    pagination.innerHTML = html;
+}
+
+function changePage(page) {
+    const totalPages = Math.ceil(totalRecords / pageSize);
+    if (page < 1 || page > totalPages) return;
+    currentPage = page;
+    loadOrders();
+}
+
+function changePageSize() {
+    pageSize = parseInt(document.getElementById('pageSizeSelect').value);
+    currentPage = 1;
+    loadOrders();
+}
+
+function resetSearch() {
+    document.getElementById('searchOrderNo').value = '';
+    document.getElementById('searchSupplier').value = '';
+    document.getElementById('searchStatus').value = '';
+    currentPage = 1;
+    loadOrders();
+}
+
+async function addOrder() {
+    const form = document.getElementById('addOrderForm');
+    const formData = new FormData(form);
+    
+    try {
+        const response = await fetch('/api/purchase_orders', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(Object.fromEntries(formData))
         });
-
-        // 加载采购订单列表
-        async function loadPurchaseOrders() {
-            const orderNo = document.getElementById('searchOrderNo').value;
-            const supplier = document.getElementById('searchSupplier').value;
-            const status = document.getElementById('searchStatus').value;
-            
-            try {
-                const response = await fetch(`/api/purchase_orders?page=${currentPage}&page_size=${pageSize}&order_no=${orderNo}&supplier=${supplier}&status=${status}`);
-                const data = await response.json();
-                
-                if (data.success) {
-                    displayPurchaseOrders(data.data);
-                    totalRecords = data.total;
-                    updatePagination(data.total);
-                } else {
-                    alert(data.message || '加载失败');
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                alert('加载失败，请重试');
-            }
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('新增成功');
+            bootstrap.Modal.getInstance(document.getElementById('addOrderModal')).hide();
+            form.reset();
+            loadOrders();
+        } else {
+            alert(data.message || '新增失败');
         }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('新增失败，请重试');
+    }
+}
 
-        // 显示采购订单列表
-        function displayPurchaseOrders(orders) {
-            const tbody = document.getElementById('purchaseOrderTableBody');
+async function editOrder(id) {
+    try {
+        const response = await fetch(`/api/purchase_orders/${id}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            const order = data.data;
+            document.getElementById('editOrderId').value = order.id;
+            document.getElementById('editOrderNo').value = order.order_no || '';
+            document.getElementById('editSupplierName').value = order.supplier_name || '';
+            document.getElementById('editOrderDate').value = order.order_date || '';
+            document.getElementById('editExpectedDate').value = order.expected_date || '';
+            document.getElementById('editTotalAmount').value = order.total_amount || 0;
+            document.getElementById('editStatus').value = order.status || 'pending';
+            document.getElementById('editNote').value = order.note || '';
             
-            if (orders.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">暂无数据</td></tr>';
-                return;
-            }
-            
-            tbody.innerHTML = orders.map(order => {
-                const statusClass = {
-                    'pending': 'status-pending',
-                    'ordered': 'status-ordered',
-                    'received': 'status-received',
-                    'cancelled': 'status-cancelled'
-                }[order.status] || '';
-                
-                const statusText = {
-                    'pending': '待处理',
-                    'ordered': '已下单',
-                    'received': '已收货',
-                    'cancelled': '已取消'
-                }[order.status] || order.status;
-                
-                return `
-                <tr>
-                    <td><strong>${order.order_no || '-'}</strong></td>
-                    <td>${order.supplier_name || '-'}</td>
-                    <td>${order.order_date || '-'}</td>
-                    <td><strong>¥${parseFloat(order.total_amount || 0).toFixed(2)}</strong></td>
-                    <td><span class="status-badge ${statusClass}">${statusText}</span></td>
-                    <td>${order.created_at || '-'}</td>
-                    <td class="action-buttons">
-                        <button class="btn btn-sm text-white" style="background-color: #6f42c1;" onclick="viewPurchaseOrder(${order.id})">
-                            <i class="bi bi-eye"></i> 查看
-                        </button>
-                        <button class="btn btn-sm btn-primary" onclick="editPurchaseOrder(${order.id})">
-                            <i class="bi bi-pencil"></i> 编辑
-                        </button>
-                        <button class="btn btn-sm btn-danger" onclick="deletePurchaseOrder(${order.id})">
-                            <i class="bi bi-trash"></i> 删除
-                        </button>
-                    </td>
-                </tr>
-                `;
-            }).join('');
+            new bootstrap.Modal(document.getElementById('editOrderModal')).show();
+        } else {
+            alert(data.message || '获取数据失败');
         }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('获取数据失败，请重试');
+    }
+}
 
-        // 更新分页
-        function updatePagination(total) {
-            const totalPages = Math.ceil(total / pageSize);
-            const pagination = document.getElementById('pagination');
-            const recordInfo = document.getElementById('recordInfo');
-            
-            recordInfo.textContent = `共 ${total} 条记录`;
-            
-            let html = '';
-            
-            html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
-                <a class="page-link" href="#" onclick="changePage(${currentPage - 1}); return false;">上一页</a>
-            </li>`;
-            
-            for (let i = 1; i <= totalPages; i++) {
-                if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
-                    html += `<li class="page-item ${i === currentPage ? 'active' : ''}">
-                        <a class="page-link" href="#" onclick="changePage(${i}); return false;">${i}</a>
-                    </li>`;
-                } else if (i === currentPage - 3 || i === currentPage + 3) {
-                    html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
-                }
-            }
-            
-            html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
-                <a class="page-link" href="#" onclick="changePage(${currentPage + 1}); return false;">下一页</a>
-            </li>`;
-            
-            pagination.innerHTML = html;
+async function updateOrder() {
+    const form = document.getElementById('editOrderForm');
+    const formData = new FormData(form);
+    const id = formData.get('id');
+    
+    try {
+        const response = await fetch(`/api/purchase_orders/${id}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(Object.fromEntries(formData))
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('更新成功');
+            bootstrap.Modal.getInstance(document.getElementById('editOrderModal')).hide();
+            loadOrders();
+        } else {
+            alert(data.message || '更新失败');
         }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('更新失败，请重试');
+    }
+}
 
-        // 切换页码
-        function changePage(page) {
-            const totalPages = Math.ceil(totalRecords / pageSize);
-            if (page < 1 || page > totalPages) return;
-            currentPage = page;
-            loadPurchaseOrders();
-        }
+function viewDetails(id) {
+    alert('订单详情功能开发中...');
+    // 可以跳转到详情页面或显示模态框
+}
 
-        // 改变每页显示数量
-        function changePageSize() {
-            pageSize = parseInt(document.getElementById('pageSizeSelect').value);
-            currentPage = 1;
-            loadPurchaseOrders();
+async function deleteOrder(id) {
+    if (!confirm('确定要删除这个订单吗？')) return;
+    
+    try {
+        const response = await fetch(`/api/purchase_orders/${id}`, {method: 'DELETE'});
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('删除成功');
+            loadOrders();
+        } else {
+            alert(data.message || '删除失败');
         }
-
-        // 重置搜索
-        function resetSearch() {
-            document.getElementById('searchOrderNo').value = '';
-            document.getElementById('searchSupplier').value = '';
-            document.getElementById('searchStatus').value = '';
-            currentPage = 1;
-            loadPurchaseOrders();
-        }
-
-        // 添加采购明细行
-        function addPurchaseItem() {
-            const tbody = document.getElementById('purchaseItemsBody');
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>
-                    <input type="text" class="form-control form-control-sm" placeholder="产品名称">
-                </td>
-                <td>
-                    <input type="number" class="form-control form-control-sm" placeholder="数量" min="1" value="1">
-                </td>
-                <td>
-                    <input type="number" class="form-control form-control-sm" placeholder="单价" min="0" step="0.01" value="0">
-                </td>
-                <td>
-                    <span class="item-amount">0.00</span>
-                </td>
-                <td>
-                    <button type="button" class="btn btn-sm btn-danger" onclick="removePurchaseItem(this)">
-                        <i class="bi bi-trash"></i>
-                    </button>
-                </td>
-            `;
-            tbody.appendChild(row);
-        }
-
-        // 删除采购明细行
-        function removePurchaseItem(btn) {
-            const tbody = document.getElementById('purchaseItemsBody');
-            if (tbody.children.length > 1) {
-                btn.closest('tr').remove();
-                calculatePurchaseTotal();
-            } else {
-                alert('至少保留一行明细');
-            }
-        }
-
-        // 计算采购总额
-        function calculatePurchaseTotal() {
-            const rows = document.querySelectorAll('#purchaseItemsBody tr');
-            let total = 0;
-            
-            rows.forEach(row => {
-                const qty = parseFloat(row.querySelector('input[type="number"]:nth-of-type(1)').value) || 0;
-                const price = parseFloat(row.querySelector('input[type="number"]:nth-of-type(2)').value) || 0;
-                const amount = qty * price;
-                
-                row.querySelector('.item-amount').textContent = amount.toFixed(2);
-                total += amount;
-            });
-            
-            document.getElementById('purchaseTotalAmount').textContent = total.toFixed(2);
-        }
-
-        // 保存采购订单
-        async function savePurchaseOrder() {
-            const form = document.getElementById('addPurchaseOrderForm');
-            const formData = new FormData(form);
-            
-            // 收集采购明细
-            const items = [];
-            document.querySelectorAll('#purchaseItemsBody tr').forEach(row => {
-                const productName = row.querySelector('input[type="text"]').value;
-                const quantity = parseFloat(row.querySelector('input[type="number"]:nth-of-type(1)').value) || 0;
-                const price = parseFloat(row.querySelector('input[type="number"]:nth-of-type(2)').value) || 0;
-                
-                if (productName && quantity > 0 && price >= 0) {
-                    items.push({
-                        product_name: productName,
-                        quantity: quantity,
-                        price: price,
-                        amount: quantity * price
-                    });
-                }
-            });
-            
-            if (items.length === 0) {
-                alert('请至少添加一条采购明细');
-                return;
-            }
-            
-            const orderData = Object.fromEntries(formData);
-            orderData.items = items;
-            orderData.total_amount = parseFloat(document.getElementById('purchaseTotalAmount').textContent);
-            
-            try {
-                const response = await fetch('/api/purchase_orders', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(orderData)
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    alert('保存成功');
-                    bootstrap.Modal.getInstance(document.getElementById('addPurchaseOrderModal')).hide();
-                    form.reset();
-                    document.getElementById('purchaseItemsBody').innerHTML = `
-                        <tr>
-                            <td><input type="text" class="form-control form-control-sm" placeholder="产品名称"></td>
-                            <td><input type="number" class="form-control form-control-sm" placeholder="数量" min="1"></td>
-                            <td><input type="number" class="form-control form-control-sm" placeholder="单价" min="0" step="0.01"></td>
-                            <td><span class="item-amount">0.00</span></td>
-                            <td><button type="button" class="btn btn-sm btn-danger" onclick="removePurchaseItem(this)"><i class="bi bi-trash"></i></button></td>
-                        </tr>
-                    `;
-                    loadPurchaseOrders();
-                } else {
-                    alert(data.message || '保存失败');
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                alert('保存失败，请重试');
-            }
-        }
-
-        // 查看采购订单详情
-        async function viewPurchaseOrder(id) {
-            try {
-                const response = await fetch(`/api/purchase_orders/${id}`);
-                const data = await response.json();
-                
-                if (data.success) {
-                    currentPurchaseOrderId = id;
-                    const order = data.data;
-                    
-                    const statusText = {
-                        'pending': '待处理',
-                        'ordered': '已下单',
-                        'received': '已收货',
-                        'cancelled': '已取消'
-                    }[order.status] || order.status;
-                    
-                    let itemsHtml = '';
-                    if (order.items && order.items.length > 0) {
-                        itemsHtml = order.items.map((item, index) => `
-                            <tr>
-                                <td>${index + 1}</td>
-                                <td>${item.product_name}</td>
-                                <td>${item.quantity}</td>
-                                <td>¥${parseFloat(item.price).toFixed(2)}</td>
-                                <td><strong>¥${parseFloat(item.amount).toFixed(2)}</strong></td>
-                            </tr>
-                        `).join('');
-                    }
-                    
-                    document.getElementById('purchaseOrderDetailContent').innerHTML = `
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <strong>采购单号：</strong>${order.order_no || '-'}
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <strong>供应商名称：</strong>${order.supplier_name || '-'}
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <strong>采购日期：</strong>${order.order_date || '-'}
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <strong>预计到货日期：</strong>${order.expected_date || '-'}
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <strong>订单状态：</strong>${statusText}
-                            </div>
-                            <div class="col-md-12 mb-3">
-                                <strong>备注：</strong>${order.note || '-'}
-                            </div>
-                            <div class="col-md-12">
-                                <h6>采购明细：</h6>
-                                <table class="table table-sm table-bordered">
-                                    <thead>
-                                        <tr>
-                                            <th>序号</th>
-                                            <th>产品名称</th>
-                                            <th>数量</th>
-                                            <th>单价</th>
-                                            <th>金额</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        ${itemsHtml}
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div class="col-md-12 text-end">
-                                <h5>采购总额：<span class="text-danger">¥${parseFloat(order.total_amount || 0).toFixed(2)}</span></h5>
-                            </div>
-                        </div>
-                    `;
-                    
-                    new bootstrap.Modal(document.getElementById('viewPurchaseOrderModal')).show();
-                } else {
-                    alert(data.message || '获取订单详情失败');
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                alert('获取订单详情失败，请重试');
-            }
-        }
-
-        // 打印采购订单
-        function printPurchaseOrder() {
-            if (!currentPurchaseOrderId) return;
-            window.open(`/api/purchase_orders/${currentPurchaseOrderId}/print`, '_blank');
-        }
-
-        // 编辑采购订单
-        function editPurchaseOrder(id) {
-            alert('编辑功能开发中...');
-        }
-
-        // 删除采购订单
-        async function deletePurchaseOrder(id) {
-            if (!confirm('确定要删除这个采购订单吗？此操作不可恢复！')) return;
-            
-            try {
-                const response = await fetch(`/api/purchase_orders/${id}`, {
-                    method: 'DELETE'
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    alert('删除成功');
-                    loadPurchaseOrders();
-                } else {
-                    alert(data.message || '删除失败');
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                alert('删除失败，请重试');
-            }
-        }
-    </script>
-</body>
-</html>
+    } catch (error) {
+        console.error('Error:', error);
+        alert('删除失败，请重试');
+    }
+}
+</script>
+{% endblock %}

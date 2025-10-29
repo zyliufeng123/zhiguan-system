@@ -1,499 +1,413 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>供应商管理 - 智管系统</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css" rel="stylesheet">
-    <style>
-        body {
-            background-color: #f8f9fa;
-            font-family: 'Microsoft YaHei', Arial, sans-serif;
-        }
-        .navbar {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        .content-wrapper {
-            margin-top: 20px;
-        }
-        .card {
-            border: none;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-        }
-        .card-header {
-            background: white;
-            border-bottom: 2px solid #f0f0f0;
-            padding: 20px;
-        }
-        .btn-success {
-            background: linear-gradient(135deg, #70AD47 0%, #5a8f3a 100%);
-            border: none;
-        }
-        .btn-success:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(112, 173, 71, 0.4);
-        }
-        .table-hover tbody tr:hover {
-            background-color: #f8fff8;
-        }
-        .search-box {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
-        .badge-code {
-            background: #e8f5e9;
-            color: #2e7d32;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9em;
-            padding: 5px 10px;
-        }
-        .action-buttons .btn {
-            margin-right: 5px;
-            margin-bottom: 5px;
-        }
-        .pagination-info {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-top: 20px;
-        }
-        .table thead th {
-            background-color: #f8f9fa;
-            font-weight: 600;
-            border-bottom: 2px solid #dee2e6;
-        }
-        .table tbody tr:hover {
-            background-color: #f8f9fa;
-        }
-    </style>
-</head>
-<body>
-    <!-- 导航栏 -->
-    <nav class="navbar navbar-dark">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="/dashboard">
-                <i class="bi bi-building"></i> 智管订单系统
-            </a>
-            <div class="d-flex">
-                <span class="navbar-text text-white me-3">
-                    <i class="bi bi-person-circle"></i> {{ session.user }}
-                </span>
-                <a href="/logout" class="btn btn-outline-light btn-sm">退出</a>
+{% extends "includes/base_with_sidebar.html" %}
+
+{% block title %}供应商管理 - 智管系统{% endblock %}
+
+{% block head %}
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css" rel="stylesheet">
+<style>
+    .table-container {
+        background: white;
+        border-radius: 10px;
+        padding: 25px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+    }
+    .search-box {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+    }
+    .action-buttons .btn {
+        margin-right: 5px;
+        margin-bottom: 5px;
+    }
+    .pagination-info {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 20px;
+    }
+    .table thead th {
+        background-color: #f8f9fa;
+        font-weight: 600;
+        border-bottom: 2px solid #dee2e6;
+    }
+    .table tbody tr:hover {
+        background-color: #f8f9fa;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- 页面标题 -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>
+            <i class="bi bi-truck text-primary"></i> 供应商管理
+        </h2>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addSupplierModal">
+            <i class="bi bi-plus-circle"></i> 新增供应商
+        </button>
+    </div>
+
+    <!-- 搜索框 -->
+    <div class="search-box">
+        <form id="searchForm" class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">供应商名称</label>
+                <input type="text" class="form-control" id="searchName" placeholder="输入供应商名称">
             </div>
-        </div>
-    </nav>
+            <div class="col-md-4">
+                <label class="form-label">联系电话</label>
+                <input type="text" class="form-control" id="searchPhone" placeholder="输入联系电话">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">&nbsp;</label>
+                <div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i> 搜索
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="resetSearch()">
+                        <i class="bi bi-arrow-clockwise"></i> 重置
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
 
-    <div class="container-fluid content-wrapper">
-        <div class="row">
-            <!-- 引入统一侧边栏 -->
-            {% include 'includes/sidebar.html' %}
-
-            <!-- 主内容区 -->
-            <div class="col-md-10">
-                <!-- 搜索区域 -->
-                <div class="search-box">
-                    <div class="row g-3 align-items-end">
-                        <div class="col-md-4">
-                            <label class="form-label">供应商名称</label>
-                            <input type="text" class="form-control" id="searchName" placeholder="输入供应商名称">
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">联系电话</label>
-                            <input type="text" class="form-control" id="searchPhone" placeholder="输入联系电话">
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">&nbsp;</label>
-                            <div>
-                                <button type="submit" class="btn btn-success">
-                                    <i class="bi bi-search"></i> 搜索
-                                </button>
-                                <button type="button" class="btn btn-secondary" onclick="resetSearch()">
-                                    <i class="bi bi-arrow-clockwise"></i> 重置
-                                </button>
+    <!-- 表格容器 -->
+    <div class="table-container">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>供应商名称</th>
+                        <th>联系人</th>
+                        <th>联系电话</th>
+                        <th>地址</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="supplierTableBody">
+                    <tr>
+                        <td colspan="6" class="text-center">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">加载中...</span>
                             </div>
-                        </div>
-                    </div>
-                </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
 
-                <!-- 数据表格 -->
-                <div class="card">
-                    <div class="card-header">
-                        <h5 class="mb-0">
-                            <i class="bi bi-building-fill"></i> 供应商列表
-                            <span class="badge bg-success ms-2" id="totalCount">0</span>
-                        </h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-hover align-middle" id="supplierTable">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>编号</th>
-                                        <th>供应商名称</th>
-                                        <th>联系人</th>
-                                        <th>联系电话</th>
-                                        <th>地址</th>
-                                        <th>创建时间</th>
-                                        <th>操作</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="supplierTableBody">
-                                    <tr>
-                                        <td colspan="7" class="text-center">
-                                            <div class="spinner-border text-success" role="status">
-                                                <span class="visually-hidden">加载中...</span>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
+        <!-- 分页信息 -->
+        <div class="pagination-info">
+            <div>
+                <span id="recordInfo">共 0 条记录</span>
+                <select class="form-select form-select-sm d-inline-block w-auto ms-2" id="pageSizeSelect" onchange="changePageSize()">
+                    <option value="10">10条/页</option>
+                    <option value="15" selected>15条/页</option>
+                    <option value="20">20条/页</option>
+                    <option value="50">50条/页</option>
+                </select>
+            </div>
+            <nav>
+                <ul class="pagination mb-0" id="pagination"></ul>
+            </nav>
+        </div>
+    </div>
+</div>
 
-                        <!-- 分页信息 -->
-                        <div class="pagination-info">
-                            <div>
-                                <span id="recordInfo">共 0 条记录</span>
-                                <select class="form-select form-select-sm d-inline-block w-auto ms-2" id="pageSizeSelect" onchange="changePageSize()">
-                                    <option value="10">10条/页</option>
-                                    <option value="15" selected>15条/页</option>
-                                    <option value="20">20条/页</option>
-                                    <option value="50">50条/页</option>
-                                </select>
-                            </div>
-                            <nav>
-                                <ul class="pagination mb-0" id="pagination">
-                                </ul>
-                            </nav>
-                        </div>
+<!-- 新增供应商模态框 -->
+<div class="modal fade" id="addSupplierModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-plus-circle"></i> 新增供应商</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addSupplierForm">
+                    <div class="mb-3">
+                        <label class="form-label">供应商名称 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" name="name" required>
                     </div>
-                </div>
+                    <div class="mb-3">
+                        <label class="form-label">联系人</label>
+                        <input type="text" class="form-control" name="contact">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">联系电话</label>
+                        <input type="text" class="form-control" name="phone">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">地址</label>
+                        <input type="text" class="form-control" name="address">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">备注</label>
+                        <textarea class="form-control" name="note" rows="2"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" onclick="addSupplier()">保存</button>
             </div>
         </div>
     </div>
+</div>
 
-    <!-- 新增供应商模态框 -->
-    <div class="modal fade" id="addSupplierModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">
-                        <i class="bi bi-plus-circle"></i> 新增供应商
-                    </h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="addSupplierForm">
-                        <div class="mb-3">
-                            <label class="form-label">供应商名称 <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" name="name" required>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">联系人</label>
-                            <input type="text" class="form-control" name="contact">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">联系电话</label>
-                            <input type="text" class="form-control" name="phone">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">地址</label>
-                            <textarea class="form-control" name="address" rows="2"></textarea>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">备注</label>
-                            <textarea class="form-control" name="note" rows="2"></textarea>
-                        </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="button" class="btn btn-success" onclick="addSupplier()">保存</button>
-                </div>
+<!-- 编辑供应商模态框 -->
+<div class="modal fade" id="editSupplierModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil-square"></i> 编辑供应商</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editSupplierForm">
+                    <input type="hidden" name="id" id="editSupplierId">
+                    <div class="mb-3">
+                        <label class="form-label">供应商名称 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" name="name" id="editSupplierName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">联系人</label>
+                        <input type="text" class="form-control" name="contact" id="editSupplierContact">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">联系电话</label>
+                        <input type="text" class="form-control" name="phone" id="editSupplierPhone">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">地址</label>
+                        <input type="text" class="form-control" name="address" id="editSupplierAddress">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">备注</label>
+                        <textarea class="form-control" name="note" id="editSupplierNote" rows="2"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" onclick="updateSupplier()">保存</button>
             </div>
         </div>
     </div>
+</div>
+{% endblock %}
 
-    <!-- 编辑供应商模态框 -->
-    <div class="modal fade" id="editSupplierModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">
-                        <i class="bi bi-pencil-square"></i> 编辑供应商
-                    </h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="editSupplierForm">
-                        <input type="hidden" name="id" id="editSupplierId">
-                        <div class="mb-3">
-                            <label class="form-label">供应商名称 <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" name="name" id="editSupplierName" required>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">联系人</label>
-                            <input type="text" class="form-control" name="contact" id="editSupplierContact">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">联系电话</label>
-                            <input type="text" class="form-control" name="phone" id="editSupplierPhone">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">地址</label>
-                            <textarea class="form-control" name="address" id="editSupplierAddress" rows="2"></textarea>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">备注</label>
-                            <textarea class="form-control" name="note" id="editSupplierNote" rows="2"></textarea>
-                        </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="button" class="btn btn-success" onclick="updateSupplier()">保存</button>
-                </div>
-            </div>
-        </div>
-    </div>
+{% block scripts %}
+<script>
+let currentPage = 1;
+let pageSize = 15;
+let totalRecords = 0;
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        let currentPage = 1;
-        let pageSize = 15;
-        let totalRecords = 0;
+document.addEventListener('DOMContentLoaded', function() {
+    loadSuppliers();
+    document.getElementById('searchForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        currentPage = 1;
+        loadSuppliers();
+    });
+});
 
-        // 页面加载时获取数据
-        document.addEventListener('DOMContentLoaded', function() {
-            loadSuppliers();
-            
-            // 搜索表单提交
-            document.getElementById('searchForm').addEventListener('submit', function(e) {
-                e.preventDefault();
-                currentPage = 1;
-                loadSuppliers();
-            });
+async function loadSuppliers() {
+    const name = document.getElementById('searchName').value;
+    const phone = document.getElementById('searchPhone').value;
+    
+    try {
+        const response = await fetch(`/api/suppliers?page=${currentPage}&page_size=${pageSize}&name=${name}&phone=${phone}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            displaySuppliers(data.data);
+            totalRecords = data.total;
+            updatePagination(data.total);
+        } else {
+            alert(data.message || '加载失败');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        document.getElementById('supplierTableBody').innerHTML = '<tr><td colspan="6" class="text-center text-danger">加载失败，请重试</td></tr>';
+    }
+}
+
+function displaySuppliers(suppliers) {
+    const tbody = document.getElementById('supplierTableBody');
+    
+    if (!Array.isArray(suppliers) || suppliers.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">暂无数据</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = suppliers.map(supplier => `
+        <tr>
+            <td><strong>${supplier.name || '-'}</strong></td>
+            <td>${supplier.contact || '-'}</td>
+            <td>${supplier.phone || '-'}</td>
+            <td>${supplier.address || '-'}</td>
+            <td>${supplier.created_at || '-'}</td>
+            <td class="action-buttons">
+                <button class="btn btn-sm btn-primary" onclick="editSupplier(${supplier.id})">
+                    <i class="bi bi-pencil"></i> 编辑
+                </button>
+                <button class="btn btn-sm btn-danger" onclick="deleteSupplier(${supplier.id})">
+                    <i class="bi bi-trash"></i> 删除
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function updatePagination(total) {
+    const totalPages = Math.ceil(total / pageSize);
+    const pagination = document.getElementById('pagination');
+    const recordInfo = document.getElementById('recordInfo');
+    
+    recordInfo.textContent = `共 ${total} 条记录`;
+    
+    let html = '';
+    html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="changePage(${currentPage - 1}); return false;">上一页</a>
+    </li>`;
+    
+    for (let i = 1; i <= totalPages; i++) {
+        if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
+            html += `<li class="page-item ${i === currentPage ? 'active' : ''}">
+                <a class="page-link" href="#" onclick="changePage(${i}); return false;">${i}</a>
+            </li>`;
+        } else if (i === currentPage - 3 || i === currentPage + 3) {
+            html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+        }
+    }
+    
+    html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="changePage(${currentPage + 1}); return false;">下一页</a>
+    </li>`;
+    
+    pagination.innerHTML = html;
+}
+
+function changePage(page) {
+    const totalPages = Math.ceil(totalRecords / pageSize);
+    if (page < 1 || page > totalPages) return;
+    currentPage = page;
+    loadSuppliers();
+}
+
+function changePageSize() {
+    pageSize = parseInt(document.getElementById('pageSizeSelect').value);
+    currentPage = 1;
+    loadSuppliers();
+}
+
+function resetSearch() {
+    document.getElementById('searchName').value = '';
+    document.getElementById('searchPhone').value = '';
+    currentPage = 1;
+    loadSuppliers();
+}
+
+async function addSupplier() {
+    const form = document.getElementById('addSupplierForm');
+    const formData = new FormData(form);
+    
+    try {
+        const response = await fetch('/api/suppliers', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(Object.fromEntries(formData))
         });
-
-        // 加载供应商列表
-        async function loadSuppliers() {
-            const name = document.getElementById('searchName').value;
-            const phone = document.getElementById('searchPhone').value;
-            
-            try {
-                const response = await fetch(`/api/suppliers?page=${currentPage}&page_size=${pageSize}&name=${name}&phone=${phone}`);
-                const data = await response.json();
-                
-                if (data.success) {
-                    displaySuppliers(data.data);
-                    totalRecords = data.total;
-                    updatePagination(data.total);
-                } else {
-                    alert(data.message || '加载失败');
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                alert('加载失败，请重试');
-            }
-        }
-
-        // 显示供应商列表
-        function displaySuppliers(suppliers) {
-            const tbody = document.getElementById('supplierTableBody');
-            
-            if (suppliers.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">暂无数据</td></tr>';
-                return;
-            }
-            
-            tbody.innerHTML = suppliers.map((supplier, index) => `
-                <tr>
-                    <td>${(currentPage - 1) * pageSize + index + 1}</td>
-                    <td><strong>${supplier.name || '-'}</strong></td>
-                    <td>${supplier.contact || '-'}</td>
-                    <td>${supplier.phone || '-'}</td>
-                    <td>${supplier.address || '-'}</td>
-                    <td>${supplier.created_at || '-'}</td>
-                    <td class="action-buttons">
-                        <button class="btn btn-sm btn-primary" onclick="editSupplier(${supplier.id})">
-                            <i class="bi bi-pencil"></i> 编辑
-                        </button>
-                        <button class="btn btn-sm btn-danger" onclick="deleteSupplier(${supplier.id})">
-                            <i class="bi bi-trash"></i> 删除
-                        </button>
-                    </td>
-                </tr>
-            `).join('');
-        }
-
-        // 更新分页
-        function updatePagination(total) {
-            const totalPages = Math.ceil(total / pageSize);
-            const pagination = document.getElementById('pagination');
-            const recordInfo = document.getElementById('recordInfo');
-            
-            recordInfo.textContent = `共 ${total} 条记录`;
-            
-            let html = '';
-            
-            // 上一页
-            html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
-                <a class="page-link" href="#" onclick="changePage(${currentPage - 1}); return false;">上一页</a>
-            </li>`;
-            
-            // 页码
-            for (let i = 1; i <= totalPages; i++) {
-                if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
-                    html += `<li class="page-item ${i === currentPage ? 'active' : ''}">
-                        <a class="page-link" href="#" onclick="changePage(${i}); return false;">${i}</a>
-                    </li>`;
-                } else if (i === currentPage - 3 || i === currentPage + 3) {
-                    html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
-                }
-            }
-            
-            // 下一页
-            html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
-                <a class="page-link" href="#" onclick="changePage(${currentPage + 1}); return false;">下一页</a>
-            </li>`;
-            
-            pagination.innerHTML = html;
-        }
-
-        // 切换页码
-        function changePage(page) {
-            const totalPages = Math.ceil(totalRecords / pageSize);
-            if (page < 1 || page > totalPages) return;
-            currentPage = page;
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('新增成功');
+            bootstrap.Modal.getInstance(document.getElementById('addSupplierModal')).hide();
+            form.reset();
             loadSuppliers();
+        } else {
+            alert(data.message || '新增失败');
         }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('新增失败，请重试');
+    }
+}
 
-        // 改变每页显示数量
-        function changePageSize() {
-            pageSize = parseInt(document.getElementById('pageSizeSelect').value);
-            currentPage = 1;
+async function editSupplier(id) {
+    try {
+        const response = await fetch(`/api/suppliers/${id}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            const supplier = data.data;
+            document.getElementById('editSupplierId').value = supplier.id;
+            document.getElementById('editSupplierName').value = supplier.name || '';
+            document.getElementById('editSupplierContact').value = supplier.contact || '';
+            document.getElementById('editSupplierPhone').value = supplier.phone || '';
+            document.getElementById('editSupplierAddress').value = supplier.address || '';
+            document.getElementById('editSupplierNote').value = supplier.note || '';
+            
+            new bootstrap.Modal(document.getElementById('editSupplierModal')).show();
+        } else {
+            alert(data.message || '获取数据失败');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('获取数据失败，请重试');
+    }
+}
+
+async function updateSupplier() {
+    const form = document.getElementById('editSupplierForm');
+    const formData = new FormData(form);
+    const id = formData.get('id');
+    
+    try {
+        const response = await fetch(`/api/suppliers/${id}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(Object.fromEntries(formData))
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('更新成功');
+            bootstrap.Modal.getInstance(document.getElementById('editSupplierModal')).hide();
             loadSuppliers();
+        } else {
+            alert(data.message || '更新失败');
         }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('更新失败，请重试');
+    }
+}
 
-        // 重置搜索
-        function resetSearch() {
-            document.getElementById('searchName').value = '';
-            document.getElementById('searchPhone').value = '';
-            currentPage = 1;
+async function deleteSupplier(id) {
+    if (!confirm('确定要删除这个供应商吗？')) return;
+    
+    try {
+        const response = await fetch(`/api/suppliers/${id}`, {method: 'DELETE'});
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('删除成功');
             loadSuppliers();
+        } else {
+            alert(data.message || '删除失败');
         }
-
-        // 新增供应商
-        async function addSupplier() {
-            const form = document.getElementById('addSupplierForm');
-            const formData = new FormData(form);
-            
-            try {
-                const response = await fetch('/api/suppliers', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(Object.fromEntries(formData))
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    alert('新增成功');
-                    bootstrap.Modal.getInstance(document.getElementById('addSupplierModal')).hide();
-                    form.reset();
-                    loadSuppliers();
-                } else {
-                    alert(data.message || '新增失败');
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                alert('新增失败，请重试');
-            }
-        }
-
-        // 编辑供应商
-        async function editSupplier(id) {
-            try {
-                const response = await fetch(`/api/suppliers/${id}`);
-                const data = await response.json();
-                
-                if (data.success) {
-                    const supplier = data.data;
-                    document.getElementById('editSupplierId').value = supplier.id;
-                    document.getElementById('editSupplierName').value = supplier.name || '';
-                    document.getElementById('editSupplierContact').value = supplier.contact || '';
-                    document.getElementById('editSupplierPhone').value = supplier.phone || '';
-                    document.getElementById('editSupplierAddress').value = supplier.address || '';
-                    document.getElementById('editSupplierNote').value = supplier.note || '';
-                    
-                    new bootstrap.Modal(document.getElementById('editSupplierModal')).show();
-                } else {
-                    alert(data.message || '获取数据失败');
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                alert('获取数据失败，请重试');
-            }
-        }
-
-        // 更新供应商
-        async function updateSupplier() {
-            const form = document.getElementById('editSupplierForm');
-            const formData = new FormData(form);
-            const id = formData.get('id');
-            
-            try {
-                const response = await fetch(`/api/suppliers/${id}`, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(Object.fromEntries(formData))
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    alert('更新成功');
-                    bootstrap.Modal.getInstance(document.getElementById('editSupplierModal')).hide();
-                    loadSuppliers();
-                } else {
-                    alert(data.message || '更新失败');
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                alert('更新失败，请重试');
-            }
-        }
-
-        // 删除供应商
-        async function deleteSupplier(id) {
-            if (!confirm('确定要删除这个供应商吗？')) return;
-            
-            try {
-                const response = await fetch(`/api/suppliers/${id}`, {
-                    method: 'DELETE'
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    alert('删除成功');
-                    loadSuppliers();
-                } else {
-                    alert(data.message || '删除失败');
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                alert('删除失败，请重试');
-            }
-        }
-    </script>
-</body>
-</html>
+    } catch (error) {
+        console.error('Error:', error);
+        alert('删除失败，请重试');
+    }
+}
+</script>
+{% endblock %}
