@@ -913,111 +913,6 @@ def page_not_found(e):
     flash('请求的页面未找到，已返回仪表盘')
     return redirect(url_for('dashboard'))
 
-# ========== 库存模块（兼容 JSON） ==========
-@app.route('/inventory')
-@login_required
-def inventory():
-    conn = get_db()
-    warehouse_filter = request.args.get('warehouse','')
-    category_filter = request.args.get('category','')
-    product_filter = request.args.get('product','')
-    query = '''
-    SELECT i.*, p.name as product_name, w.name as warehouse_name, c.name as category_name
-    FROM inventory i
-    LEFT JOIN products p ON i.product_id = p.id
-    LEFT JOIN warehouses w ON i.warehouse_id = w.id
-    LEFT JOIN categories c ON i.category_id = c.id
-    WHERE 1=1
-    '''
-    params = []
-    if warehouse_filter:
-        query += ' AND w.name LIKE ?'; params.append(f'%{warehouse_filter}%')
-    if category_filter:
-        query += ' AND c.name LIKE ?'; params.append(f'%{category_filter}%')
-    if product_filter:
-        query += ' AND p.name LIKE ?'; params.append(f'%{product_filter}%')
-    items = conn.execute(query, params).fetchall()
-    warehouses = conn.execute('SELECT id, name FROM warehouses').fetchall()
-    categories = conn.execute('SELECT id, name FROM categories').fetchall()
-    products = conn.execute('SELECT id, name FROM products').fetchall()
-    conn.close()
-    return render_template('inventory.html', items=items, warehouses=warehouses, categories=categories, products=products)
-
-@app.route('/inventory/data')
-@login_required
-def inventory_data():
-    conn = get_db()
-    rows = conn.execute('''
-        SELECT i.*, p.name as product_name, w.name as warehouse_name, c.name as category_name
-        FROM inventory i
-        LEFT JOIN products p ON i.product_id = p.id
-        LEFT JOIN warehouses w ON i.warehouse_id = w.id
-        LEFT JOIN categories c ON i.category_id = c.id
-    ''').fetchall()
-    conn.close()
-    return jsonify([dict(r) for r in rows])
-
-@app.route('/inventory/add', methods=['POST'])
-@login_required
-def add_inventory():
-    try:
-        if request.is_json:
-            data = request.get_json()
-            pid = data.get('product_id')
-            wid = data.get('warehouse_id')
-            cid = data.get('category_id')
-            qty = data.get('qty')
-        else:
-            pid = request.form.get('product_id')
-            wid = request.form.get('warehouse_id')
-            cid = request.form.get('category_id')
-            qty = request.form.get('qty')
-        conn = get_db()
-        conn.execute('INSERT INTO inventory (product_id, warehouse_id, category_id, qty, last_update) VALUES (?, ?, ?, ?, ?)',
-                     (pid, wid, cid, qty, datetime.now().strftime('%Y-%m-%d')))
-        conn.commit()
-        conn.close()
-        if request.is_json:
-            return jsonify({"success": True})
-        flash('库存新增成功')
-        return redirect(url_for('inventory'))
-    except Exception as e:
-        logger.exception("inventory add 错误")
-        if request.is_json:
-            return jsonify({"success": False, "error": str(e)}), 500
-        flash(f'新增失败: {e}')
-        return redirect(url_for('inventory'))
-
-@app.route('/inventory/update/<int:iid>', methods=['POST'])
-@login_required
-def update_inventory(iid):
-    try:
-        pid = request.form.get('product_id')
-        wid = request.form.get('warehouse_id')
-        cid = request.form.get('category_id')
-        qty = request.form.get('qty')
-        conn = get_db()
-        conn.execute('UPDATE inventory SET product_id=?, warehouse_id=?, category_id=?, qty=?, last_update=? WHERE id=?',
-                     (pid, wid, cid, qty, datetime.now().strftime('%Y-%m-%d'), iid))
-        conn.commit()
-        conn.close()
-        flash('库存更新成功')
-        return redirect(url_for('inventory'))
-    except Exception as e:
-        logger.exception("inventory update 错误")
-        flash(f'更新失败: {e}')
-        return redirect(url_for('inventory'))
-
-@app.route('/inventory/delete/<int:iid>')
-@login_required
-def delete_inventory(iid):
-    conn = get_db()
-    conn.execute('DELETE FROM inventory WHERE id=?', (iid,))
-    conn.commit()
-    conn.close()
-    flash('库存删除成功')
-    return redirect(url_for('inventory'))
-
 @app.route('/pivot')
 @login_required
 def pivot():
@@ -4422,6 +4317,809 @@ def export_customers():
         
     except Exception as e:
         logger.error(f"导出客户数据失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+# ========== 分拣标签管理 API ==========
+
+def generate_label_code():
+    """生成标签编号"""
+    conn = get_db()
+    cur = conn.cursor()
+    today = datetime.now().strftime('%Y%m%d')
+    prefix = f'FJ{today}'
+    
+    cur.execute('''
+        SELECT label_code FROM picking_labels 
+        WHERE label_code LIKE ? 
+        ORDER BY label_code DESC LIMIT 1
+    ''', (f'{prefix}%',))
+    
+    result = cur.fetchone()
+    conn.close()
+    
+    if result:
+        last_num = int(result[0][-4:])
+        new_num = last_num + 1
+    else:
+        new_num = 1
+    
+    return f'{prefix}{new_num:04d}'
+
+
+@app.route('/picking_labels')
+@login_required
+def picking_labels_page():
+    """分拣标签管理页面"""
+    return render_template('picking_labels.html')
+
+
+@app.route('/api/picking_labels', methods=['GET'])
+@login_required
+def get_picking_labels():
+    """获取分拣标签列表"""
+    try:
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 15))
+        search_label_code = request.args.get('label_code', '').strip()
+        search_order_code = request.args.get('order_code', '').strip()
+        search_status = request.args.get('status', '').strip()
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        where_conditions = []
+        params = []
+        
+        if search_label_code:
+            where_conditions.append("label_code LIKE ?")
+            params.append(f'%{search_label_code}%')
+        
+        if search_order_code:
+            where_conditions.append("order_code LIKE ?")
+            params.append(f'%{search_order_code}%')
+        
+        if search_status:
+            where_conditions.append("label_status = ?")
+            params.append(search_status)
+        
+        where_clause = ' AND '.join(where_conditions) if where_conditions else '1=1'
+        
+        cur.execute(f"SELECT COUNT(*) FROM picking_labels WHERE {where_clause}", params)
+        total = cur.fetchone()[0]
+        
+        offset = (page - 1) * page_size
+        cur.execute(f'''
+            SELECT id, label_code, order_id, order_code, customer_name,
+                   product_name, category, specification, quantity, unit,
+                   delivery_date, label_status, print_count, remarks, create_time
+            FROM picking_labels 
+            WHERE {where_clause}
+            ORDER BY create_time DESC
+            LIMIT ? OFFSET ?
+        ''', params + [page_size, offset])
+        
+        columns = [desc[0] for desc in cur.description]
+        items = [dict(zip(columns, row)) for row in cur.fetchall()]
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'items': items,
+                'total': total,
+                'page': page,
+                'page_size': page_size,
+                'total_pages': (total + page_size - 1) // page_size
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"获取标签列表失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/picking_labels/<int:label_id>', methods=['GET'])
+@login_required
+def get_picking_label(label_id):
+    """获取单个标签详情"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        cur.execute('''
+            SELECT id, label_code, order_id, order_code, customer_name,
+                   product_name, category, specification, quantity, unit,
+                   delivery_date, label_status, print_count, remarks
+            FROM picking_labels WHERE id = ?
+        ''', (label_id,))
+        
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'success': False, 'message': '标签不存在'}), 404
+        
+        columns = [desc[0] for desc in cur.description]
+        label = dict(zip(columns, row))
+        
+        conn.close()
+        
+        return jsonify({'success': True, 'data': label})
+        
+    except Exception as e:
+        logger.error(f"获取标签详情失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/picking_labels/generate', methods=['POST'])
+@login_required
+def generate_picking_labels():
+    """从销售订单生成标签"""
+    try:
+        data = request.get_json()
+        order_id = data.get('order_id')
+        items = data.get('items', [])
+        
+        if not order_id:
+            return jsonify({'success': False, 'message': '订单ID不能为空'}), 400
+        
+        if not items:
+            return jsonify({'success': False, 'message': '请选择要生成标签的商品'}), 400
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 获取订单信息
+        cur.execute('''
+            SELECT order_code, customer_name, delivery_date
+            FROM sales_orders WHERE id = ?
+        ''', (order_id,))
+        
+        order = cur.fetchone()
+        if not order:
+            conn.close()
+            return jsonify({'success': False, 'message': '订单不存在'}), 404
+        
+        order_code, customer_name, delivery_date = order
+        
+        # 为每个商品生成标签
+        generated_count = 0
+        for item in items:
+            label_code = generate_label_code()
+            
+            cur.execute('''
+                INSERT INTO picking_labels (
+                    label_code, order_id, order_code, customer_name,
+                    product_name, category, specification, quantity, unit,
+                    delivery_date, label_status, create_user
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                label_code,
+                order_id,
+                order_code,
+                customer_name,
+                item['product_name'],
+                item.get('category'),
+                item.get('specification'),
+                item['quantity'],
+                item.get('unit', '件'),
+                delivery_date,
+                '待打印',
+                session.get('user', 'system')
+            ))
+            generated_count += 1
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': f'成功生成 {generated_count} 个标签',
+            'count': generated_count
+        })
+        
+    except Exception as e:
+        logger.error(f"生成标签失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/picking_labels/mark_printed', methods=['POST'])
+@login_required
+def mark_labels_printed():
+    """标记标签为已打印"""
+    try:
+        data = request.get_json()
+        label_ids = data.get('label_ids', [])
+        
+        if not label_ids:
+            return jsonify({'success': False, 'message': '标签ID不能为空'}), 400
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        placeholders = ','.join(['?'] * len(label_ids))
+        cur.execute(f'''
+            UPDATE picking_labels 
+            SET label_status = '已打印',
+                print_count = print_count + 1
+            WHERE id IN ({placeholders})
+        ''', label_ids)
+        
+        conn.commit()
+        updated = cur.rowcount
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': f'成功更新 {updated} 个标签',
+            'count': updated
+        })
+        
+    except Exception as e:
+        logger.error(f"更新标签状态失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/picking_labels/<int:label_id>', methods=['DELETE'])
+@login_required
+def delete_picking_label(label_id):
+    """删除标签"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        cur.execute('SELECT id FROM picking_labels WHERE id = ?', (label_id,))
+        if not cur.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'message': '标签不存在'}), 404
+        
+        cur.execute('DELETE FROM picking_labels WHERE id = ?', (label_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': '删除成功'})
+        
+    except Exception as e:
+        logger.error(f"删除标签失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+# ========== 库存管理 API ==========
+
+def generate_record_code(record_type):
+    """生成入库/出库单号"""
+    conn = get_db()
+    cur = conn.cursor()
+    today = datetime.now().strftime('%Y%m%d')
+    prefix = f'{record_type}{today}'
+    
+    table_name = 'inbound_records' if record_type == 'RK' else 'outbound_records'
+    
+    cur.execute(f'''
+        SELECT record_code FROM {table_name}
+        WHERE record_code LIKE ? 
+        ORDER BY record_code DESC LIMIT 1
+    ''', (f'{prefix}%',))
+    
+    result = cur.fetchone()
+    conn.close()
+    
+    if result:
+        last_num = int(result[0][-4:])
+        new_num = last_num + 1
+    else:
+        new_num = 1
+    
+    return f'{prefix}{new_num:04d}'
+
+
+@app.route('/inventory')
+@login_required
+def inventory_page():
+    """库存管理页面"""
+    return render_template('inventory.html')
+
+
+@app.route('/api/inventory', methods=['GET'])
+@login_required
+def get_inventory():
+    """获取库存列表"""
+    try:
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 15))
+        search_product = request.args.get('product_name', '').strip()
+        search_category = request.args.get('category', '').strip()
+        search_stock_status = request.args.get('stock_status', '').strip()
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        where_conditions = []
+        params = []
+        
+        if search_product:
+            where_conditions.append("product_name LIKE ?")
+            params.append(f'%{search_product}%')
+        
+        if search_category:
+            where_conditions.append("category = ?")
+            params.append(search_category)
+        
+        if search_stock_status:
+            if search_stock_status == 'low':
+                where_conditions.append("current_stock <= 0")
+            elif search_stock_status == 'warning':
+                where_conditions.append("current_stock > 0 AND current_stock <= safe_stock")
+            elif search_stock_status == 'normal':
+                where_conditions.append("current_stock > safe_stock")
+        
+        where_clause = ' AND '.join(where_conditions) if where_conditions else '1=1'
+        
+        cur.execute(f"SELECT COUNT(*) FROM inventory WHERE {where_clause}", params)
+        total = cur.fetchone()[0]
+        
+        offset = (page - 1) * page_size
+        cur.execute(f'''
+            SELECT id, product_name, category, specification, unit,
+                   current_stock, safe_stock, warehouse_location, remarks,
+                   create_time, update_time
+            FROM inventory 
+            WHERE {where_clause}
+            ORDER BY product_name
+            LIMIT ? OFFSET ?
+        ''', params + [page_size, offset])
+        
+        columns = [desc[0] for desc in cur.description]
+        items = [dict(zip(columns, row)) for row in cur.fetchall()]
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'items': items,
+                'total': total,
+                'page': page,
+                'page_size': page_size,
+                'total_pages': (total + page_size - 1) // page_size
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"获取库存列表失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/inventory/<int:product_id>', methods=['GET'])
+@login_required
+def get_inventory_item(product_id):
+    """获取单个库存商品详情"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        cur.execute('''
+            SELECT id, product_name, category, specification, unit,
+                   current_stock, safe_stock, warehouse_location, remarks
+            FROM inventory WHERE id = ?
+        ''', (product_id,))
+        
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'success': False, 'message': '商品不存在'}), 404
+        
+        columns = [desc[0] for desc in cur.description]
+        item = dict(zip(columns, row))
+        
+        conn.close()
+        
+        return jsonify({'success': True, 'data': item})
+        
+    except Exception as e:
+        logger.error(f"获取库存详情失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/inventory', methods=['POST'])
+@login_required
+def add_inventory():
+    """新增库存商品"""
+    try:
+        data = request.get_json()
+        
+        required_fields = ['product_name']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'success': False, 'message': f'{field}不能为空'}), 400
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 检查是否已存在
+        cur.execute('''
+            SELECT id FROM inventory 
+            WHERE product_name = ? AND specification = ?
+        ''', (data['product_name'], data.get('specification', '')))
+        
+        if cur.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'message': '该商品已存在'}), 400
+        
+        cur.execute('''
+            INSERT INTO inventory (
+                product_name, category, specification, unit,
+                current_stock, safe_stock, warehouse_location, remarks
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            data['product_name'],
+            data.get('category', ''),
+            data.get('specification', ''),
+            data.get('unit', '件'),
+            data.get('current_stock', 0),
+            data.get('safe_stock', 0),
+            data.get('warehouse_location', ''),
+            data.get('remarks', '')
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': '商品添加成功'})
+        
+    except Exception as e:
+        logger.error(f"添加库存商品失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/inventory/<int:product_id>', methods=['PUT'])
+@login_required
+def update_inventory_item(product_id):
+    """更新库存商品信息"""
+    try:
+        data = request.get_json()
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        cur.execute('SELECT id FROM inventory WHERE id = ?', (product_id,))
+        if not cur.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'message': '商品不存在'}), 404
+        
+        cur.execute('''
+            UPDATE inventory SET
+                category = ?,
+                specification = ?,
+                unit = ?,
+                safe_stock = ?,
+                warehouse_location = ?,
+                remarks = ?,
+                update_time = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (
+            data.get('category', ''),
+            data.get('specification', ''),
+            data.get('unit', '件'),
+            data.get('safe_stock', 0),
+            data.get('warehouse_location', ''),
+            data.get('remarks', ''),
+            product_id
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': '更新成功'})
+        
+    except Exception as e:
+        logger.error(f"更新库存失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/inventory/statistics', methods=['GET'])
+@login_required
+def get_inventory_statistics():
+    """获取库存统计数据"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 总商品数
+        cur.execute('SELECT COUNT(*) FROM inventory')
+        total_products = cur.fetchone()[0]
+        
+        # 低库存商品数
+        cur.execute('SELECT COUNT(*) FROM inventory WHERE current_stock <= safe_stock')
+        low_stock_count = cur.fetchone()[0]
+        
+        # 今日入库
+        today = datetime.now().strftime('%Y-%m-%d')
+        cur.execute('SELECT COUNT(*) FROM inbound_records WHERE inbound_date = ?', (today,))
+        today_inbound = cur.fetchone()[0]
+        
+        # 今日出库
+        cur.execute('SELECT COUNT(*) FROM outbound_records WHERE outbound_date = ?', (today,))
+        today_outbound = cur.fetchone()[0]
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'total_products': total_products,
+                'low_stock_count': low_stock_count,
+                'today_inbound': today_inbound,
+                'today_outbound': today_outbound
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"获取统计数据失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/inventory/categories', methods=['GET'])
+@login_required
+def get_inventory_categories():
+    """获取所有商品类别"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        cur.execute('SELECT DISTINCT category FROM inventory WHERE category IS NOT NULL AND category != "" ORDER BY category')
+        categories = [row[0] for row in cur.fetchall()]
+        
+        conn.close()
+        
+        return jsonify({'success': True, 'data': categories})
+        
+    except Exception as e:
+        logger.error(f"获取类别失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/inventory/inbound', methods=['POST'])
+@login_required
+def create_inbound():
+    """创建入库记录"""
+    try:
+        data = request.get_json()
+        
+        required_fields = ['product_id', 'quantity', 'inbound_date']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'success': False, 'message': f'{field}不能为空'}), 400
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 获取商品信息
+        cur.execute('''
+            SELECT product_name, category, specification, unit, current_stock
+            FROM inventory WHERE id = ?
+        ''', (data['product_id'],))
+        
+        product = cur.fetchone()
+        if not product:
+            conn.close()
+            return jsonify({'success': False, 'message': '商品不存在'}), 404
+        
+        product_name, category, specification, unit, current_stock = product
+        
+        # 生成入库单号
+        record_code = generate_record_code('RK')
+        
+        # 插入入库记录
+        cur.execute('''
+            INSERT INTO inbound_records (
+                record_code, inbound_type, product_name, category, specification,
+                quantity, unit, purchase_order_code, supplier_name,
+                inbound_date, operator, remarks
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            record_code,
+            data.get('inbound_type', '采购入库'),
+            product_name,
+            category,
+            specification,
+            data['quantity'],
+            unit,
+            data.get('purchase_order_code', ''),
+            data.get('supplier_name', ''),
+            data['inbound_date'],
+            session.get('user', 'system'),
+            data.get('remarks', '')
+        ))
+        
+        # 更新库存
+        new_stock = current_stock + float(data['quantity'])
+        cur.execute('''
+            UPDATE inventory SET 
+                current_stock = ?,
+                update_time = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (new_stock, data['product_id']))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': '入库成功',
+            'record_code': record_code
+        })
+        
+    except Exception as e:
+        logger.error(f"入库失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/inventory/outbound', methods=['POST'])
+@login_required
+def create_outbound():
+    """创建出库记录"""
+    try:
+        data = request.get_json()
+        
+        required_fields = ['product_id', 'quantity', 'outbound_date']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'success': False, 'message': f'{field}不能为空'}), 400
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 获取商品信息
+        cur.execute('''
+            SELECT product_name, category, specification, unit, current_stock
+            FROM inventory WHERE id = ?
+        ''', (data['product_id'],))
+        
+        product = cur.fetchone()
+        if not product:
+            conn.close()
+            return jsonify({'success': False, 'message': '商品不存在'}), 404
+        
+        product_name, category, specification, unit, current_stock = product
+        
+        # 检查库存是否足够
+        quantity = float(data['quantity'])
+        if current_stock < quantity:
+            conn.close()
+            return jsonify({'success': False, 'message': f'库存不足，当前库存：{current_stock}'}), 400
+        
+        # 生成出库单号
+        record_code = generate_record_code('CK')
+        
+        # 插入出库记录
+        cur.execute('''
+            INSERT INTO outbound_records (
+                record_code, outbound_type, product_name, category, specification,
+                quantity, unit, sales_order_code, customer_name,
+                outbound_date, operator, remarks
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            record_code,
+            data.get('outbound_type', '销售出库'),
+            product_name,
+            category,
+            specification,
+            quantity,
+            unit,
+            data.get('sales_order_code', ''),
+            data.get('customer_name', ''),
+            data['outbound_date'],
+            session.get('user', 'system'),
+            data.get('remarks', '')
+        ))
+        
+        # 更新库存
+        new_stock = current_stock - quantity
+        cur.execute('''
+            UPDATE inventory SET 
+                current_stock = ?,
+                update_time = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (new_stock, data['product_id']))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': '出库成功',
+            'record_code': record_code
+        })
+        
+    except Exception as e:
+        logger.error(f"出库失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/inventory/inbound_records', methods=['GET'])
+@login_required
+def get_inbound_records():
+    """获取入库记录"""
+    try:
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 15))
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        cur.execute('SELECT COUNT(*) FROM inbound_records')
+        total = cur.fetchone()[0]
+        
+        offset = (page - 1) * page_size
+        cur.execute('''
+            SELECT id, record_code, inbound_type, product_name, specification,
+                   quantity, unit, supplier_name, inbound_date, operator, remarks
+            FROM inbound_records
+            ORDER BY inbound_date DESC, create_time DESC
+            LIMIT ? OFFSET ?
+        ''', [page_size, offset])
+        
+        columns = [desc[0] for desc in cur.description]
+        items = [dict(zip(columns, row)) for row in cur.fetchall()]
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'items': items,
+                'total': total,
+                'page': page,
+                'page_size': page_size
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"获取入库记录失败: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/inventory/outbound_records', methods=['GET'])
+@login_required
+def get_outbound_records():
+    """获取出库记录"""
+    try:
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 15))
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        cur.execute('SELECT COUNT(*) FROM outbound_records')
+        total = cur.fetchone()[0]
+        
+        offset = (page - 1) * page_size
+        cur.execute('''
+            SELECT id, record_code, outbound_type, product_name, specification,
+                   quantity, unit, customer_name, outbound_date, operator, remarks
+            FROM outbound_records
+            ORDER BY outbound_date DESC, create_time DESC
+            LIMIT ? OFFSET ?
+        ''', [page_size, offset])
+        
+        columns = [desc[0] for desc in cur.description]
+        items = [dict(zip(columns, row)) for row in cur.fetchall()]
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'items': items,
+                'total': total,
+                'page': page,
+                'page_size': page_size
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"获取出库记录失败: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
 if __name__ == '__main__':
