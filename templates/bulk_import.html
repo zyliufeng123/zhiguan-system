@@ -1,0 +1,468 @@
+{% extends "includes/base_with_sidebar.html" %}
+
+{% block title %}{{ config.module_name }} - 智管系统{% endblock %}
+
+{% block head %}
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css" rel="stylesheet">
+<script>
+// 配置信息（从后端传入）
+const moduleConfig = {{ config | tojson }};
+let currentStep = 1;
+let uploadedFileId = null;
+let fileColumns = [];
+let filePreviewData = [];
+let totalRows = 0;
+let fieldMapping = {};
+let importStrategies = {
+    duplicate: 'ask',
+    skipErrors: true,
+    generateErrorReport: true
+};
+
+document.addEventListener('DOMContentLoaded', function() {
+    initUploadArea();
+    updateStepIndicator();
+});
+
+// 初始化拖拽上传
+function initUploadArea() {
+    const uploadArea = document.getElementById('uploadArea');
+    
+    uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadArea.classList.add('dragover');
+    });
+    
+    uploadArea.addEventListener('dragleave', () => {
+        uploadArea.classList.remove('dragover');
+    });
+    
+    uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadArea.classList.remove('dragover');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            handleFile(files[0]);
+        }
+    });
+}
+
+// 处理文件选择
+function handleFileSelect(event) {
+    const file = event.target.files[0];
+    if (file) {
+        handleFile(file);
+    }
+}
+
+// 处理文件上传
+async function handleFile(file) {
+    const allowedTypes = ['.xlsx', '.xls', '.csv'];
+    const fileExt = '.' + file.name.split('.').pop().toLowerCase();
+    
+    if (!allowedTypes.includes(fileExt)) {
+        showError('不支持的文件格式，仅支持 .xlsx, .xls, .csv');
+        return;
+    }
+    
+    if (file.size > 10 * 1024 * 1024) {
+        showError('文件大小超过限制，最大支持 10MB');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+        showLoading('正在上传文件...');
+        
+        const response = await fetch('/api/bulk_import/upload', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        hideLoading();
+        
+        if (result.success) {
+            uploadedFileId = result.data.file_id;
+            fileColumns = result.data.columns;
+            filePreviewData = result.data.preview_data;
+            totalRows = result.data.total_rows;
+            
+            document.getElementById('fileName').textContent = result.data.original_filename;
+            document.getElementById('totalRows').textContent = totalRows;
+            document.getElementById('fileInfoContainer').style.display = 'block';
+            document.getElementById('uploadArea').style.display = 'none';
+            
+            document.getElementById('btnNext').disabled = false;
+            
+            showSuccess('文件上传成功！');
+        } else {
+            showError(result.message);
+        }
+    } catch (error) {
+        hideLoading();
+        console.error('上传失败:', error);
+        showError('上传失败: ' + error.message);
+    }
+}
+
+// 清除文件
+function clearFile() {
+    if (uploadedFileId) {
+        fetch(`/api/bulk_import/file/${uploadedFileId}`, { method: 'DELETE' });
+    }
+    
+    uploadedFileId = null;
+    fileColumns = [];
+    filePreviewData = [];
+    totalRows = 0;
+    
+    document.getElementById('fileInput').value = '';
+    document.getElementById('fileInfoContainer').style.display = 'none';
+    document.getElementById('uploadArea').style.display = 'block';
+    document.getElementById('btnNext').disabled = true;
+}
+
+// 下载模板
+function downloadTemplate() {
+    window.location.href = `/api/bulk_import/download_template/${moduleConfig.module_code}`;
+}
+
+// 更新步骤指示器
+function updateStepIndicator() {
+    for (let i = 1; i <= 4; i++) {
+        const stepItem = document.getElementById(`step${i}`);
+        const stepContent = document.getElementById(`stepContent${i}`);
+        
+        if (i < currentStep) {
+            stepItem.classList.add('completed');
+            stepItem.classList.remove('active');
+            if (stepContent) stepContent.style.display = 'none';
+        } else if (i === currentStep) {
+            stepItem.classList.add('active');
+            stepItem.classList.remove('completed');
+            if (stepContent) stepContent.style.display = 'block';
+        } else {
+            stepItem.classList.remove('active', 'completed');
+            if (stepContent) stepContent.style.display = 'none';
+        }
+    }
+    
+    // 更新按钮
+    document.getElementById('btnPrev').style.display = currentStep > 1 ? 'block' : 'none';
+    
+    const btnNext = document.getElementById('btnNext');
+    if (currentStep === 4) {
+        btnNext.style.display = 'none';
+    } else {
+        btnNext.style.display = 'block';
+        btnNext.innerHTML = currentStep === 3 ? 
+            '<i class="bi bi-play-circle"></i> 开始导入' : 
+            '下一步 <i class="bi bi-arrow-right"></i>';
+    }
+}
+
+// 下一步
+async function nextStep() {
+    if (currentStep === 1) {
+        // 进入字段映射
+        await loadFieldMapping();
+        currentStep = 2;
+    } else if (currentStep === 2) {
+        // 验证映射
+        if (!validateMapping()) {
+            return;
+        }
+        currentStep = 3;
+    } else if (currentStep === 3) {
+        // 开始导入
+        currentStep = 4;
+        updateStepIndicator();
+        await executeImport();
+        return;
+    }
+    
+    updateStepIndicator();
+}
+
+// 上一步
+function prevStep() {
+    if (currentStep > 1) {
+        currentStep--;
+        updateStepIndicator();
+    }
+}
+
+// 加载字段映射
+async function loadFieldMapping() {
+    try {
+        showLoading('正在智能匹配字段...');
+        
+        const response = await fetch('/api/bulk_import/smart_mapping', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                module_code: moduleConfig.module_code,
+                excel_columns: fileColumns
+            })
+        });
+        
+        const result = await response.json();
+        hideLoading();
+        
+        if (result.success) {
+            const mapping = result.data.mapping;
+            const systemFields = result.data.system_fields;
+            
+            // 渲染映射表格
+            renderMappingTable(mapping, systemFields);
+        } else {
+            showError(result.message);
+        }
+    } catch (error) {
+        hideLoading();
+        console.error('加载字段映射失败:', error);
+        showError('加载字段映射失败: ' + error.message);
+    }
+}
+
+// 渲染映射表格
+function renderMappingTable(mapping, systemFields) {
+    const tbody = document.getElementById('mappingTableBody');
+    tbody.innerHTML = '';
+    
+    fileColumns.forEach((excelCol, index) => {
+        const matchInfo = mapping[excelCol];
+        const previewData = filePreviewData.map(row => row[index]).filter(v => v).slice(0, 3);
+        
+        const row = document.createElement('tr');
+        
+        // Excel列名
+        const colCell = document.createElement('td');
+        colCell.innerHTML = `<span class="excel-column">${excelCol}</span>`;
+        row.appendChild(colCell);
+        
+        // 映射字段选择
+        const mapCell = document.createElement('td');
+        const select = document.createElement('select');
+        select.className = 'form-select form-select-sm';
+        select.dataset.excelColumn = excelCol;
+        select.onchange = () => updateMapping(excelCol, select.value);
+        
+        // 添加"不导入"选项
+        const noneOption = document.createElement('option');
+        noneOption.value = '';
+        noneOption.textContent = '-- 不导入此列 --';
+        select.appendChild(noneOption);
+        
+        // 添加系统字段选项
+        systemFields.forEach(field => {
+            const option = document.createElement('option');
+            option.value = field.field_name;
+            option.textContent = field.display_name + 
+                (field.is_required ? ' (必填)' : '') +
+                (matchInfo.matched_field === field.field_name ? ` [相似度: ${matchInfo.similarity}%]` : '');
+            
+            if (matchInfo.matched_field === field.field_name) {
+                option.selected = true;
+                fieldMapping[excelCol] = field.field_name;
+            }
+            
+            select.appendChild(option);
+        });
+        
+        mapCell.appendChild(select);
+        
+        // 如果是必填字段且已匹配，添加标记
+        if (matchInfo.is_required && matchInfo.matched_field) {
+            const badge = document.createElement('span');
+            badge.className = 'required-badge';
+            badge.textContent = '必填';
+            mapCell.appendChild(badge);
+        }
+        
+        row.appendChild(mapCell);
+        
+        // 预览数据
+        const previewCell = document.createElement('td');
+        previewCell.innerHTML = `<div class="preview-data">${previewData.join(', ') || '无数据'}</div>`;
+        row.appendChild(previewCell);
+        
+        tbody.appendChild(row);
+    });
+}
+
+// 更新映射
+function updateMapping(excelColumn, fieldName) {
+    if (fieldName) {
+        fieldMapping[excelColumn] = fieldName;
+    } else {
+        delete fieldMapping[excelColumn];
+    }
+}
+
+// 验证映射
+function validateMapping() {
+    // 检查必填字段是否都已映射
+    const requiredFields = moduleConfig.fields.filter(f => f.is_required).map(f => f.field_name);
+    const mappedFields = Object.values(fieldMapping);
+    
+    const missingFields = requiredFields.filter(field => !mappedFields.includes(field));
+    
+    if (missingFields.length > 0) {
+        const missingNames = missingFields.map(fieldName => {
+            const field = moduleConfig.fields.find(f => f.field_name === fieldName);
+            return field ? field.display_name : fieldName;
+        });
+        
+        showError(`请映射以下必填字段：${missingNames.join('、')}`);
+        return false;
+    }
+    
+    return true;
+}
+
+// 选择策略
+function selectStrategy(type, strategy) {
+    if (type === 'duplicate') {
+        importStrategies.duplicate = strategy;
+        
+        // 更新UI
+        document.querySelectorAll('.strategy-card').forEach(card => {
+            card.classList.remove('selected');
+        });
+        event.currentTarget.classList.add('selected');
+        
+        // 更新radio
+        document.getElementById(`strategy${strategy.charAt(0).toUpperCase() + strategy.slice(1)}`).checked = true;
+    }
+}
+
+// 执行导入
+async function executeImport() {
+    document.getElementById('importingView').style.display = 'block';
+    document.getElementById('resultView').style.display = 'none';
+    
+    // 收集策略
+    importStrategies.skipErrors = document.getElementById('skipErrors').checked;
+    importStrategies.generateErrorReport = document.getElementById('generateErrorReport').checked;
+    
+    try {
+        // 启动导入任务
+        const response = await fetch('/api/bulk_import/execute', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                file_id: uploadedFileId,
+                module_code: moduleConfig.module_code,
+                field_mapping: fieldMapping,
+                strategies: importStrategies,
+                total_rows: totalRows
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            const taskId = result.data.task_id;
+            // 开始轮询进度
+            pollImportProgress(taskId);
+        } else {
+            showError(result.message);
+            currentStep = 3;
+            updateStepIndicator();
+        }
+        
+    } catch (error) {
+        console.error('启动导入失败:', error);
+        showError('启动导入失败: ' + error.message);
+        currentStep = 3;
+        updateStepIndicator();
+    }
+}
+
+// 轮询导入进度
+let progressInterval = null;
+
+function pollImportProgress(taskId) {
+    progressInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/bulk_import/progress/${taskId}`);
+            const result = await response.json();
+            
+            if (result.success) {
+                const data = result.data;
+                
+                // 更新进度条
+                document.getElementById('progressBar').style.width = data.progress + '%';
+                document.getElementById('progressBar').textContent = data.progress + '%';
+                document.getElementById('progressText').textContent = 
+                    `已处理 ${data.processed} / ${data.total_rows} 行`;
+                
+                // 更新统计
+                document.getElementById('statProcessed').textContent = data.processed;
+                document.getElementById('statSuccess').textContent = data.success;
+                document.getElementById('statSkipped').textContent = data.skipped;
+                document.getElementById('statFailed').textContent = data.failed;
+                
+                // 检查是否完成
+                if (data.status === 'completed' || data.status === 'failed') {
+                    clearInterval(progressInterval);
+                    showImportResult(data, taskId);
+                }
+            }
+        } catch (error) {
+            console.error('获取进度失败:', error);
+        }
+    }, 500);  // 每500ms查询一次
+}
+
+// 显示导入结果
+function showImportResult(data, taskId) {
+    document.getElementById('importingView').style.display = 'none';
+    document.getElementById('resultView').style.display = 'block';
+    
+    document.getElementById('resultTotal').textContent = data.total_rows;
+    document.getElementById('resultSuccess').textContent = data.success;
+    document.getElementById('resultSkipped').textContent = data.skipped;
+    document.getElementById('resultFailed').textContent = data.failed;
+    
+    // 显示错误信息
+    if (data.failed > 0 && data.errors && data.errors.length > 0) {
+        document.getElementById('errorSection').style.display = 'block';
+        
+        const errorList = document.getElementById('errorList');
+        errorList.innerHTML = data.errors.map(error => `
+            <div class="error-item">
+                <strong>第 ${error.row} 行：</strong>${error.message}
+            </div>
+        `).join('');
+        
+        // 设置下载错误报告按钮
+        const downloadBtn = document.querySelector('#errorSection button');
+        if (downloadBtn) {
+            downloadBtn.onclick = () => {
+                window.location.href = `/api/bulk_import/download_error_report/${taskId}`;
+            };
+        }
+    }
+    
+    // 显示完成提示
+    if (data.status === 'completed') {
+        showSuccess(`导入完成！成功: ${data.success}, 跳过: ${data.skipped}, 失败: ${data.failed}`);
+    }
+}
+
+function downloadErrorReport() {
+    // 这个函数会在 showImportResult 中动态设置 onclick
+    console.log('下载错误报告');
+}
+
+</script>
+{% endblock %}

@@ -114,6 +114,14 @@
                 </a>
             </li>
 
+                        <!-- 导入配置管理 -->
+            <li class="nav-item mb-2">
+                <a class="nav-link text-white {{ 'active' if request.endpoint == 'import_config_list' else '' }}" 
+                   href="{{ url_for('import_config_list') }}">
+                    <i class="fas fa-file-import me-2"></i>导入配置管理
+                </a>
+            </li>
+
             <!-- 退出登录 -->
             <li class="nav-item mb-2">
                 <a class="nav-link text-white" href="{{ url_for('logout') }}">

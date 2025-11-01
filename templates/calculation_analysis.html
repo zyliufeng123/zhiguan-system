@@ -88,6 +88,14 @@ document.addEventListener('visibilitychange', function() {
 
 console.log('计算分析页面脚本加载完成');
 
+// ===== 新增：产品名称清理函数 =====
+function cleanProductName(name) {
+    if (!name) return '';
+    // 匹配模式：产品名称-数字编码
+    const match = name.trim().match(/^(.+?)-\d+$/);
+    return match ? match[1].trim() : name.trim();
+}
+
 // 全局变量
 let companyColumns = [];
 let tableData = [];
@@ -162,6 +170,8 @@ async function generateTable() {
         if (!productList) {
             alert('请输入产品列表或取消勾选手动设置');
             return;
+            const rawProducts = productList.split('\n').filter(p => p.trim());
+            products = rawProducts.map(p => cleanProductName(p));
         }
         products = productList.split('\n').filter(p => p.trim());
     } else {
@@ -205,7 +215,7 @@ async function getAutoProducts() {
     const result = await response.json();
     
     if (result.success) {
-        return result.products;
+        return result.products.map(p => cleanProductName(p));
     } else {
         throw new Error(result.error || '获取产品列表失败');
     }
@@ -692,8 +702,17 @@ function loadTableState() {
 function clearTable() {
     console.log('清空表格');
     if (confirm('确定要清空所有数据吗？此操作不可恢复。')) {
+        // 先清除localStorage
         localStorage.removeItem('zhiguan_calculation_state');
+        
+        // 设置一个标记，表示用户主动清空
+        sessionStorage.setItem('zhiguan_clear_flag', 'true');
+        
+        // 清空内存中的全局变量
         window.customColumns = [];
+        companyColumns = [];
+        
+        // 重新加载页面
         location.reload();
     }
 }
@@ -1084,6 +1103,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // 恢复页面状态
 function restorePageState() {
+    // 检查是否是用户主动清空
+    if (sessionStorage.getItem('zhiguan_clear_flag') === 'true') {
+        sessionStorage.removeItem('zhiguan_clear_flag');
+        console.log('用户已清空数据，跳过恢复');
+        return;
+    }
+    
     try {
         const saved = localStorage.getItem('zhiguan_calculation_state');
         if (!saved) {

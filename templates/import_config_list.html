@@ -1,0 +1,285 @@
+{% extends "includes/base_with_sidebar.html" %}
+
+{% block title %}导入配置管理 - 智管系统{% endblock %}
+
+{% block head %}
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css" rel="stylesheet">
+<style>
+    .table-container {
+        background: white;
+        border-radius: 8px;
+        padding: 20px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .search-box {
+        background: white;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+    
+    .status-badge {
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 500;
+    }
+    
+    .status-enabled {
+        background-color: #d4edda;
+        color: #155724;
+    }
+    
+    .status-disabled {
+        background-color: #f8d7da;
+        color: #721c24;
+    }
+    
+    .table thead th {
+        background-color: #f8f9fa;
+        font-weight: 600;
+        border-bottom: 2px solid #dee2e6;
+    }
+    
+    .table tbody tr:hover {
+        background-color: #f8f9fa;
+    }
+    
+    .action-buttons .btn {
+        padding: 4px 12px;
+        font-size: 14px;
+        margin: 0 2px;
+    }
+    
+    .unique-fields-tag {
+        display: inline-block;
+        background-color: #e7f3ff;
+        color: #0066cc;
+        padding: 2px 8px;
+        margin: 2px;
+        border-radius: 4px;
+        font-size: 12px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- 页面标题 -->
+    <div class="page-header">
+        <h4><i class="bi bi-gear"></i> 导入配置管理</h4>
+        <button class="btn btn-primary" onclick="window.location.href='/settings/import_config/add'">
+            <i class="bi bi-plus-circle"></i> 新增配置
+        </button>
+    </div>
+
+    <!-- 搜索框 -->
+    <div class="search-box">
+        <form id="searchForm" class="row g-3" onsubmit="event.preventDefault(); loadConfigs();">
+            <div class="col-md-4">
+                <label class="form-label">模块名称/标识</label>
+                <input type="text" class="form-control" id="searchKeyword" placeholder="输入关键词搜索">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">状态</label>
+                <select class="form-select" id="searchStatus">
+                    <option value="">全部状态</option>
+                    <option value="enabled">启用</option>
+                    <option value="disabled">禁用</option>
+                </select>
+            </div>
+            <div class="col-md-5 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary me-2">
+                    <i class="bi bi-search"></i> 搜索
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="resetSearch()">
+                    <i class="bi bi-arrow-clockwise"></i> 重置
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- 表格容器 -->
+    <div class="table-container">
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th width="60">序号</th>
+                    <th width="120">模块标识</th>
+                    <th width="150">模块名称</th>
+                    <th width="120">目标表</th>
+                    <th>唯一性字段</th>
+                    <th width="100">状态</th>
+                    <th width="150">创建时间</th>
+                    <th width="200">操作</th>
+                </tr>
+            </thead>
+            <tbody id="configTableBody">
+                <tr>
+                    <td colspan="8" class="text-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">加载中...</span>
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <div id="emptyState" style="display: none;" class="text-center py-5">
+            <i class="bi bi-inbox" style="font-size: 48px; color: #ccc;"></i>
+            <p class="text-muted mt-3">暂无配置数据</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    loadConfigs();
+});
+
+async function loadConfigs() {
+    const keyword = document.getElementById('searchKeyword').value.trim();
+    const status = document.getElementById('searchStatus').value;
+    
+    try {
+        const params = new URLSearchParams();
+        if (keyword) params.append('search', keyword);
+        if (status) params.append('status', status);
+        
+        const response = await fetch(`/api/import_config?${params.toString()}`);
+        const result = await response.json();
+        
+        if (result.success) {
+            displayConfigs(result.data);
+        } else {
+            showError('加载配置失败: ' + result.message);
+        }
+    } catch (error) {
+        console.error('加载配置失败:', error);
+        showError('加载配置失败: ' + error.message);
+    }
+}
+
+function displayConfigs(configs) {
+    const tbody = document.getElementById('configTableBody');
+    const emptyState = document.getElementById('emptyState');
+    
+    if (!configs || configs.length === 0) {
+        tbody.innerHTML = '';
+        emptyState.style.display = 'block';
+        return;
+    }
+    
+    emptyState.style.display = 'none';
+    
+    tbody.innerHTML = configs.map((config, index) => {
+        // 处理唯一性字段
+        const uniqueFields = config.unique_fields ? 
+            config.unique_fields.split(',').map(field => 
+                `<span class="unique-fields-tag">${field.trim()}</span>`
+            ).join('') : 
+            '<span class="text-muted">未设置</span>';
+        
+        // 状态徽章
+        const statusBadge = config.status === 'enabled' ? 
+            '<span class="status-badge status-enabled">启用</span>' : 
+            '<span class="status-badge status-disabled">禁用</span>';
+        
+        // 格式化创建时间
+        const createTime = config.create_time ? 
+            new Date(config.create_time).toLocaleString('zh-CN') : '-';
+        
+        return `
+            <tr>
+                <td>${index + 1}</td>
+                <td><code>${config.module_code}</code></td>
+                <td>${config.module_name}</td>
+                <td><code>${config.target_table}</code></td>
+                <td>${uniqueFields}</td>
+                <td>${statusBadge}</td>
+                <td>${createTime}</td>
+                <td class="action-buttons">
+                    <button class="btn btn-sm btn-outline-primary" 
+                            onclick="viewConfig(${config.id})" 
+                            title="查看详情">
+                        <i class="bi bi-eye"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-warning" 
+                            onclick="editConfig(${config.id})" 
+                            title="编辑">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-${config.status === 'enabled' ? 'secondary' : 'success'}" 
+                            onclick="toggleStatus(${config.id}, '${config.status}')" 
+                            title="${config.status === 'enabled' ? '禁用' : '启用'}">
+                        <i class="bi bi-${config.status === 'enabled' ? 'pause' : 'play'}-circle"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function viewConfig(id) {
+    // 跳转到详情页（暂时用编辑页代替）
+    window.location.href = `/settings/import_config/edit/${id}`;
+}
+
+function editConfig(id) {
+    window.location.href = `/settings/import_config/edit/${id}`;
+}
+
+async function toggleStatus(id, currentStatus) {
+    const action = currentStatus === 'enabled' ? '禁用' : '启用';
+    
+    if (!confirm(`确定要${action}此配置吗？`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/import_config/${id}/toggle`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showSuccess(result.message);
+            loadConfigs(); // 刷新列表
+        } else {
+            showError(result.message);
+        }
+    } catch (error) {
+        console.error('切换状态失败:', error);
+        showError('操作失败: ' + error.message);
+    }
+}
+
+function resetSearch() {
+    document.getElementById('searchKeyword').value = '';
+    document.getElementById('searchStatus').value = '';
+    loadConfigs();
+}
+
+function showSuccess(message) {
+    // 简单的成功提示（后续可以用更好的UI组件）
+    alert('✅ ' + message);
+}
+
+function showError(message) {
+    // 简单的错误提示（后续可以用更好的UI组件）
+    alert('❌ ' + message);
+}
+</script>
+{% endblock %}

@@ -82,6 +82,21 @@ def _parse_number(v):
         return float(s)
     except Exception:
         return None
+    
+def clean_product_name(name):
+    """
+    清理产品名称，去除后面的编码
+    例如：丑橘（丑桔、丑柑、丑八怪）-0301019900 -> 丑橘（丑桔、丑柑、丑八怪）
+    """
+    if not name:
+        return name
+    
+    # 匹配模式：产品名称-数字编码
+    match = re.match(r'^(.+?)-\d+$', str(name).strip())
+    if match:
+        return match.group(1).strip()
+    
+    return str(name).strip()
 
 # --- 新增：基础变量与工具函数（必须） ---
 # 上传/临时相关常量（放在 imports 之后、app.config 使用之前）
@@ -1111,6 +1126,36 @@ def ensure_tables():
         FOREIGN KEY (order_id) REFERENCES sales_orders(id) ON DELETE CASCADE
     )''')
     
+    # ========== 通用批量导入：配置管理表 ==========
+    
+    # 导入配置主表
+    cur.execute('''CREATE TABLE IF NOT EXISTS import_config (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        module_code VARCHAR(50) UNIQUE NOT NULL,
+        module_name VARCHAR(100) NOT NULL,
+        target_table VARCHAR(100) NOT NULL,
+        unique_fields TEXT,
+        status VARCHAR(20) DEFAULT 'enabled',
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        update_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+    
+    # 导入配置字段表
+    cur.execute('''CREATE TABLE IF NOT EXISTS import_config_fields (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        config_id INTEGER NOT NULL,
+        field_name VARCHAR(100) NOT NULL,
+        display_name VARCHAR(100) NOT NULL,
+        field_type VARCHAR(20) NOT NULL,
+        is_required INTEGER DEFAULT 0,
+        default_value TEXT,
+        max_length INTEGER,
+        sort_order INTEGER DEFAULT 0,
+        remark TEXT,
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (config_id) REFERENCES import_config(id) ON DELETE CASCADE
+    )''')
+
     conn.commit()
     
     # 创建索引
@@ -1128,6 +1173,10 @@ def ensure_tables():
         cur.execute('CREATE INDEX IF NOT EXISTS idx_purchase_orders_status ON purchase_orders(status)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_picking_labels_order ON picking_labels(order_id)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_picking_labels_status ON picking_labels(status)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_import_config_module ON import_config(module_code)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_import_config_status ON import_config(status)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_import_config_fields_config ON import_config_fields(config_id)')
+
     except Exception as e:
         logger.warning(f"创建索引时出现警告: {str(e)}")
 
@@ -2498,6 +2547,7 @@ def print_sales_order(order_id):
 
 @app.route('/api/products', methods=['GET'])
 def api_products():
+    """产品搜索API - 用于下拉框等场景"""
     query = request.args.get('q', '')
     limit = int(request.args.get('limit', 10))
     
@@ -2509,8 +2559,23 @@ def api_products():
                     (f'%{query}%', limit))
     else:
         cur.execute('SELECT id, name FROM products ORDER BY name LIMIT ?', (limit,))
+    
+    # 核心修改：返回清理后的产品名并去重
+    products = []
+    seen_names = set()
+    
+    for row in cur.fetchall():
+        original_name = row[1]
+        clean_name = clean_product_name(original_name)
         
-    products = [{'id': row[0], 'name': row[1]} for row in cur.fetchall()]
+        # 去重：同一个清理后的名称只返回一次
+        if clean_name not in seen_names:
+            products.append({
+                'id': row[0],
+                'name': clean_name
+            })
+            seen_names.add(clean_name)
+    
     conn.close()
     
     return jsonify(products)
@@ -3142,7 +3207,7 @@ def api_get_prices():
     """获取产品价格数据用于计算表格"""
     try:
         data = request.get_json()
-        products = data.get('products', [])
+        products = data.get('products', [])  # 这里收到的已经是清理后的产品名
         company_columns = data.get('company_columns', [])
         
         if not products or not company_columns:
@@ -3154,8 +3219,9 @@ def api_get_prices():
         # 构建结果数据
         result_data = {}
         
-        for product in products:
-            result_data[product] = {}
+        for clean_product in products:
+            # 使用清理后的产品名作为键
+            result_data[clean_product] = {}
             
             for col_info in company_columns:
                 company = col_info.get('company', '')
@@ -3164,25 +3230,30 @@ def api_get_prices():
                 col_name = col_info.get('name', '')
                 
                 if not all([company, year, month]):
-                    result_data[product][col_name] = '参数错误'
+                    result_data[clean_product][col_name] = '参数错误'
                     continue
                 
                 # 构建日期模式 YYYY-MM%
                 date_pattern = f"{year}-{int(month):02d}%"
                 
-                # 查询数据库
+                # 核心修改：查询时兼容两种格式（精确匹配 + 模糊匹配）
                 cur.execute('''
                     SELECT price FROM quotes 
-                    WHERE product = ? AND company = ? AND bid_date LIKE ?
+                    WHERE company = ? 
+                    AND bid_date LIKE ?
+                    AND (product = ? OR product LIKE ?)
                     ORDER BY bid_date DESC LIMIT 1
-                ''', (product, company, date_pattern))
+                ''', (company, date_pattern, clean_product, f"{clean_product}-%"))
                 
                 row = cur.fetchone()
                 
-                if row:
-                    result_data[product][col_name] = float(row[0])
+                if row and row[0] is not None:
+                    try:
+                        result_data[clean_product][col_name] = float(row[0])
+                    except (ValueError, TypeError):
+                        result_data[clean_product][col_name] = '数据错误'
                 else:
-                    result_data[product][col_name] = '无数据'
+                    result_data[clean_product][col_name] = '无数据'
         
         conn.close()
         
@@ -3623,19 +3694,26 @@ def api_get_auto_products():
         cur.execute('''
             SELECT DISTINCT product FROM quotes 
             WHERE company = ? AND bid_date LIKE ?
-            ORDER BY id
+            ORDER BY product
         ''', (company, date_pattern))
         
         rows = cur.fetchall()
-        products = [row[0] for row in rows]
+        
+        # 核心修改：清理所有产品名称并去重
+        products_set = set()
+        for row in rows:
+            original_name = row[0]
+            clean_name = clean_product_name(original_name)
+            products_set.add(clean_name)
+        
+        products = sorted(list(products_set))
+        
         conn.close()
         
         if not products:
             return jsonify({'error': '无数据，请检查第一个价格列的设置'}), 404
         
-        # 检查是否有重复产品（理论上不应该，但按需求检查）
-        if len(products) != len(set(products)):
-            return jsonify({'error': '数据中存在重复产品，请检查数据完整性'}), 400
+        logger.info(f"自动获取产品列表: {len(products)} 个产品")
         
         return jsonify({
             'success': True,
@@ -5138,6 +5216,1409 @@ def get_outbound_records():
     except Exception as e:
         logger.error(f"获取出库记录失败: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
+
+# ========== 通用批量导入：配置管理API ==========
+
+@app.route('/api/import_config', methods=['GET'])
+def get_import_configs():
+    """获取导入配置列表"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 获取搜索参数
+        search = request.args.get('search', '').strip()
+        status = request.args.get('status', '').strip()
+        
+        # 构建查询
+        query = "SELECT * FROM import_config WHERE 1=1"
+        params = []
+        
+        if search:
+            query += " AND (module_code LIKE ? OR module_name LIKE ?)"
+            params.extend([f'%{search}%', f'%{search}%'])
+        
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        
+        query += " ORDER BY create_time DESC"
+        
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        
+        configs = []
+        for row in rows:
+            configs.append({
+                'id': row[0],
+                'module_code': row[1],
+                'module_name': row[2],
+                'target_table': row[3],
+                'unique_fields': row[4],
+                'status': row[5],
+                'create_time': row[6],
+                'update_time': row[7]
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': configs
+        })
+        
+    except Exception as e:
+        logger.error(f"获取配置列表失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'获取配置列表失败: {str(e)}'
+        }), 500
+
+
+@app.route('/api/import_config/<int:config_id>', methods=['GET'])
+def get_import_config(config_id):
+    """获取单个导入配置详情（包含字段列表）"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 获取配置基本信息
+        cur.execute("SELECT * FROM import_config WHERE id = ?", (config_id,))
+        row = cur.fetchone()
+        
+        if not row:
+            return jsonify({
+                'success': False,
+                'message': '配置不存在'
+            }), 404
+        
+        config = {
+            'id': row[0],
+            'module_code': row[1],
+            'module_name': row[2],
+            'target_table': row[3],
+            'unique_fields': row[4],
+            'status': row[5],
+            'create_time': row[6],
+            'update_time': row[7]
+        }
+        
+        # 获取字段配置
+        cur.execute("""
+            SELECT * FROM import_config_fields 
+            WHERE config_id = ? 
+            ORDER BY sort_order, id
+        """, (config_id,))
+        
+        field_rows = cur.fetchall()
+        fields = []
+        for f_row in field_rows:
+            fields.append({
+                'id': f_row[0],
+                'config_id': f_row[1],
+                'field_name': f_row[2],
+                'display_name': f_row[3],
+                'field_type': f_row[4],
+                'is_required': bool(f_row[5]),
+                'default_value': f_row[6],
+                'max_length': f_row[7],
+                'sort_order': f_row[8],
+                'remark': f_row[9]
+            })
+        
+        config['fields'] = fields
+        
+        return jsonify({
+            'success': True,
+            'data': config
+        })
+        
+    except Exception as e:
+        logger.error(f"获取配置详情失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'获取配置详情失败: {str(e)}'
+        }), 500
+
+
+@app.route('/api/import_config', methods=['POST'])
+def create_import_config():
+    """新增导入配置"""
+    try:
+        data = request.get_json()
+        
+        # 验证必填字段
+        required_fields = ['module_code', 'module_name', 'target_table', 'unique_fields']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({
+                    'success': False,
+                    'message': f'缺少必填字段: {field}'
+                }), 400
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 检查 module_code 是否已存在
+        cur.execute("SELECT id FROM import_config WHERE module_code = ?", 
+                   (data['module_code'],))
+        if cur.fetchone():
+            return jsonify({
+                'success': False,
+                'message': '模块标识已存在'
+            }), 400
+        
+        # 处理 unique_fields（如果是列表，转为逗号分隔的字符串）
+        unique_fields = data['unique_fields']
+        if isinstance(unique_fields, list):
+            unique_fields = ','.join(unique_fields)
+        
+        # 插入主配置
+        cur.execute("""
+            INSERT INTO import_config 
+            (module_code, module_name, target_table, unique_fields, status)
+            VALUES (?, ?, ?, ?, ?)
+        """, (
+            data['module_code'],
+            data['module_name'],
+            data['target_table'],
+            unique_fields,
+            data.get('status', 'enabled')
+        ))
+        
+        config_id = cur.lastrowid
+        
+        # 插入字段配置
+        fields = data.get('fields', [])
+        for idx, field in enumerate(fields):
+            cur.execute("""
+                INSERT INTO import_config_fields
+                (config_id, field_name, display_name, field_type, is_required, 
+                 default_value, max_length, sort_order, remark)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                config_id,
+                field['field_name'],
+                field['display_name'],
+                field['field_type'],
+                1 if field.get('is_required') else 0,
+                field.get('default_value'),
+                field.get('max_length'),
+                field.get('sort_order', idx),
+                field.get('remark')
+            ))
+        
+        conn.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': '配置创建成功',
+            'data': {'id': config_id}
+        })
+        
+    except Exception as e:
+        logger.error(f"创建配置失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'创建配置失败: {str(e)}'
+        }), 500
+
+
+@app.route('/api/import_config/<int:config_id>', methods=['PUT'])
+def update_import_config(config_id):
+    """更新导入配置"""
+    try:
+        data = request.get_json()
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 检查配置是否存在
+        cur.execute("SELECT id FROM import_config WHERE id = ?", (config_id,))
+        if not cur.fetchone():
+            return jsonify({
+                'success': False,
+                'message': '配置不存在'
+            }), 404
+        
+        # 如果修改了 module_code，检查是否与其他配置冲突
+        if 'module_code' in data:
+            cur.execute("""
+                SELECT id FROM import_config 
+                WHERE module_code = ? AND id != ?
+            """, (data['module_code'], config_id))
+            if cur.fetchone():
+                return jsonify({
+                    'success': False,
+                    'message': '模块标识已被其他配置使用'
+                }), 400
+        
+        # 处理 unique_fields
+        unique_fields = data.get('unique_fields')
+        if unique_fields and isinstance(unique_fields, list):
+            unique_fields = ','.join(unique_fields)
+        
+        # 更新主配置
+        cur.execute("""
+            UPDATE import_config 
+            SET module_code = ?,
+                module_name = ?,
+                target_table = ?,
+                unique_fields = ?,
+                status = ?,
+                update_time = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (
+            data.get('module_code'),
+            data.get('module_name'),
+            data.get('target_table'),
+            unique_fields,
+            data.get('status', 'enabled'),
+            config_id
+        ))
+        
+        # 更新字段配置（先删除旧的，再插入新的）
+        if 'fields' in data:
+            cur.execute("DELETE FROM import_config_fields WHERE config_id = ?", 
+                       (config_id,))
+            
+            fields = data['fields']
+            for idx, field in enumerate(fields):
+                cur.execute("""
+                    INSERT INTO import_config_fields
+                    (config_id, field_name, display_name, field_type, is_required,
+                     default_value, max_length, sort_order, remark)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    config_id,
+                    field['field_name'],
+                    field['display_name'],
+                    field['field_type'],
+                    1 if field.get('is_required') else 0,
+                    field.get('default_value'),
+                    field.get('max_length'),
+                    field.get('sort_order', idx),
+                    field.get('remark')
+                ))
+        
+        conn.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': '配置更新成功'
+        })
+        
+    except Exception as e:
+        logger.error(f"更新配置失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'更新配置失败: {str(e)}'
+        }), 500
+
+
+@app.route('/api/import_config/<int:config_id>', methods=['DELETE'])
+def delete_import_config(config_id):
+    """删除导入配置（实际上是禁用）"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 检查配置是否存在
+        cur.execute("SELECT id FROM import_config WHERE id = ?", (config_id,))
+        if not cur.fetchone():
+            return jsonify({
+                'success': False,
+                'message': '配置不存在'
+            }), 404
+        
+        # 设置为禁用状态而不是真删除
+        cur.execute("""
+            UPDATE import_config 
+            SET status = 'disabled',
+                update_time = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (config_id,))
+        
+        conn.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': '配置已禁用'
+        })
+        
+    except Exception as e:
+        logger.error(f"删除配置失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'删除配置失败: {str(e)}'
+        }), 500
+
+
+@app.route('/api/import_config/<int:config_id>/toggle', methods=['POST'])
+def toggle_import_config(config_id):
+    """切换配置的启用/禁用状态"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 获取当前状态
+        cur.execute("SELECT status FROM import_config WHERE id = ?", (config_id,))
+        row = cur.fetchone()
+        
+        if not row:
+            return jsonify({
+                'success': False,
+                'message': '配置不存在'
+            }), 404
+        
+        current_status = row[0]
+        new_status = 'disabled' if current_status == 'enabled' else 'enabled'
+        
+        # 更新状态
+        cur.execute("""
+            UPDATE import_config 
+            SET status = ?,
+                update_time = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (new_status, config_id))
+        
+        conn.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'配置已{"启用" if new_status == "enabled" else "禁用"}',
+            'data': {'status': new_status}
+        })
+        
+    except Exception as e:
+        logger.error(f"切换配置状态失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'切换配置状态失败: {str(e)}'
+        }), 500
+
+# ========== 通用批量导入：文件处理工具函数 ==========
+
+def allowed_import_file(filename):
+    """检查文件扩展名是否允许"""
+    ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'csv'}
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def parse_excel_file(file_path, preview_rows=10):
+    """
+    解析Excel文件，提取列名和预览数据
+    
+    Args:
+        file_path: 文件路径
+        preview_rows: 预览行数
+    
+    Returns:
+        {
+            'columns': ['列名1', '列名2', ...],
+            'preview_data': [[row1], [row2], ...],
+            'total_rows': 总行数,
+            'file_type': 文件类型
+        }
+    """
+    try:
+        import pandas as pd
+        
+        # 判断文件类型
+        file_ext = file_path.rsplit('.', 1)[1].lower()
+        
+        # 读取文件
+        if file_ext == 'csv':
+            # CSV文件可能有编码问题，尝试多种编码
+            encodings = ['utf-8', 'gbk', 'gb2312', 'utf-8-sig']
+            df = None
+            for encoding in encodings:
+                try:
+                    df = pd.read_csv(file_path, encoding=encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            
+            if df is None:
+                raise Exception('无法识别CSV文件编码，请使用UTF-8编码')
+        else:
+            # Excel文件
+            df = pd.read_excel(file_path, engine='openpyxl')
+        
+        # 删除完全为空的行
+        df = df.dropna(how='all')
+        
+        # 获取列名
+        columns = df.columns.tolist()
+        
+        # 获取总行数
+        total_rows = len(df)
+        
+        # 获取预览数据
+        preview_df = df.head(preview_rows)
+        
+        # 将预览数据转换为列表格式，处理NaN值
+        preview_data = []
+        for _, row in preview_df.iterrows():
+            row_data = []
+            for val in row:
+                if pd.isna(val):
+                    row_data.append(None)
+                else:
+                    row_data.append(str(val))
+            preview_data.append(row_data)
+        
+        return {
+            'columns': columns,
+            'preview_data': preview_data,
+            'total_rows': total_rows,
+            'file_type': file_ext
+        }
+        
+    except Exception as e:
+        logger.error(f"解析文件失败: {str(e)}")
+        raise Exception(f'文件解析失败: {str(e)}')
+
+
+def clean_temp_files(max_age_hours=24):
+    """清理超过指定时间的临时文件"""
+    import time
+    
+    try:
+        now = time.time()
+        max_age_seconds = max_age_hours * 3600
+        
+        cleaned = 0
+        for filename in os.listdir(UPLOAD_FOLDER):
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            if os.path.isfile(file_path):
+                file_age = now - os.path.getmtime(file_path)
+                if file_age > max_age_seconds:
+                    os.remove(file_path)
+                    cleaned += 1
+                    logger.info(f"清理临时文件: {filename}")
+        
+        if cleaned > 0:
+            logger.info(f"清理了 {cleaned} 个超过 {max_age_hours} 小时的临时文件")
+        
+        return cleaned
+        
+    except Exception as e:
+        logger.error(f"清理临时文件失败: {str(e)}")
+        return 0
+
+
+# ========== 通用批量导入：文件上传API ==========
+
+@app.route('/api/bulk_import/upload', methods=['POST'])
+def upload_import_file():
+    """
+    上传导入文件
+    返回: 文件ID、列名列表、预览数据、总行数
+    """
+    try:
+        # 检查是否有文件
+        if 'file' not in request.files:
+            return jsonify({
+                'success': False,
+                'message': '未选择文件'
+            }), 400
+        
+        file = request.files['file']
+        
+        if file.filename == '':
+            return jsonify({
+                'success': False,
+                'message': '文件名为空'
+            }), 400
+        
+        # 检查文件类型
+        if not allowed_import_file(file.filename):
+            return jsonify({
+                'success': False,
+                'message': '不支持的文件格式，仅支持 .xlsx, .xls, .csv'
+            }), 400
+        
+        # 生成唯一文件名
+        file_id = secrets.token_hex(16)
+        original_filename = secure_filename(file.filename)
+        file_ext = original_filename.rsplit('.', 1)[1].lower()
+        saved_filename = f"{file_id}.{file_ext}"
+        file_path = os.path.join(UPLOAD_FOLDER, saved_filename)
+        
+        # 保存文件
+        file.save(file_path)
+        logger.info(f"文件上传成功: {original_filename} -> {saved_filename}")
+        
+        # 解析文件
+        parse_result = parse_excel_file(file_path, preview_rows=10)
+        
+        # 清理旧文件
+        clean_temp_files(max_age_hours=24)
+        
+        return jsonify({
+            'success': True,
+            'message': '文件上传成功',
+            'data': {
+                'file_id': file_id,
+                'original_filename': original_filename,
+                'columns': parse_result['columns'],
+                'preview_data': parse_result['preview_data'],
+                'total_rows': parse_result['total_rows'],
+                'file_type': parse_result['file_type']
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"文件上传失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'文件上传失败: {str(e)}'
+        }), 500
+
+
+@app.route('/api/bulk_import/file/<file_id>', methods=['DELETE'])
+def delete_import_file(file_id):
+    """删除上传的临时文件"""
+    try:
+        # 查找文件
+        deleted = False
+        for filename in os.listdir(UPLOAD_FOLDER):
+            if filename.startswith(file_id):
+                file_path = os.path.join(UPLOAD_FOLDER, filename)
+                os.remove(file_path)
+                deleted = True
+                logger.info(f"删除临时文件: {filename}")
+                break
+        
+        if deleted:
+            return jsonify({
+                'success': True,
+                'message': '文件已删除'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': '文件不存在'
+            }), 404
+            
+    except Exception as e:
+        logger.error(f"删除文件失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'删除文件失败: {str(e)}'
+        }), 500
+    
+    # ========== 通用批量导入：配置管理页面路由 ==========
+
+@app.route('/settings/import_config')
+def import_config_list():
+    """导入配置管理列表页面"""
+    return render_template('import_config_list.html')
+
+
+@app.route('/settings/import_config/add')
+def import_config_add():
+    """新增导入配置页面"""
+    return render_template('import_config_form.html', mode='add')
+
+
+@app.route('/settings/import_config/edit/<int:config_id>')
+def import_config_edit(config_id):
+    """编辑导入配置页面"""
+    return render_template('import_config_form.html', mode='edit', config_id=config_id)
+
+# ========== 通用批量导入：导入页面路由 ==========
+
+@app.route('/<module_code>/bulk_import')
+def bulk_import(module_code):
+    """通用批量导入页面"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 获取模块配置
+        cur.execute("""
+            SELECT * FROM import_config 
+            WHERE module_code = ? AND status = 'enabled'
+        """, (module_code,))
+        
+        config_row = cur.fetchone()
+        
+        if not config_row:
+            flash(f'导入配置不存在或已禁用: {module_code}', 'error')
+            return redirect(url_for('index'))
+        
+        # 构建配置对象
+        config = {
+            'id': config_row[0],
+            'module_code': config_row[1],
+            'module_name': config_row[2],
+            'target_table': config_row[3],
+            'unique_fields': config_row[4],
+            'status': config_row[5]
+        }
+        
+        # 获取字段配置
+        cur.execute("""
+            SELECT * FROM import_config_fields 
+            WHERE config_id = ? 
+            ORDER BY sort_order, id
+        """, (config['id'],))
+        
+        field_rows = cur.fetchall()
+        fields = []
+        for f_row in field_rows:
+            fields.append({
+                'field_name': f_row[2],
+                'display_name': f_row[3],
+                'field_type': f_row[4],
+                'is_required': bool(f_row[5]),
+                'default_value': f_row[6],
+                'max_length': f_row[7],
+                'remark': f_row[9]
+            })
+        
+        config['fields'] = fields
+        
+        return render_template('bulk_import.html', config=config)
+        
+    except Exception as e:
+        logger.error(f"加载导入页面失败: {str(e)}")
+        flash(f'加载导入页面失败: {str(e)}', 'error')
+        return redirect(url_for('index'))
+    
+    # ========== 通用批量导入：模板下载API ==========
+
+@app.route('/api/bulk_import/download_template/<module_code>')
+def download_template(module_code):
+    """下载导入模板"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 获取配置
+        cur.execute("""
+            SELECT * FROM import_config 
+            WHERE module_code = ? AND status = 'enabled'
+        """, (module_code,))
+        
+        config_row = cur.fetchone()
+        if not config_row:
+            return jsonify({
+                'success': False,
+                'message': '配置不存在或已禁用'
+            }), 404
+        
+        config_id = config_row[0]
+        module_name = config_row[2]
+        
+        # 获取字段配置
+        cur.execute("""
+            SELECT field_name, display_name, is_required, remark 
+            FROM import_config_fields 
+            WHERE config_id = ? 
+            ORDER BY sort_order, id
+        """, (config_id,))
+        
+        fields = cur.fetchall()
+        
+        if not fields:
+            return jsonify({
+                'success': False,
+                'message': '未配置字段'
+            }), 400
+        
+        # 生成Excel模板
+        import pandas as pd
+        from io import BytesIO
+        
+        # 创建列名（显示名称）
+        columns = []
+        remarks = []
+        
+        for field in fields:
+            field_name, display_name, is_required, remark = field
+            
+            # 列名
+            if is_required:
+                col_name = f"{display_name}*"
+            else:
+                col_name = display_name
+            
+            columns.append(col_name)
+            remarks.append(remark or '')
+        
+        # 创建DataFrame
+        df = pd.DataFrame(columns=columns)
+        
+        # 添加示例行（可选）
+        # df.loc[0] = ['示例数据'] * len(columns)
+        
+        # 创建Excel writer
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='导入数据')
+            
+            # 获取工作表
+            workbook = writer.book
+            worksheet = writer.sheets['导入数据']
+            
+            # 设置列宽
+            for idx, col in enumerate(columns, 1):
+                column_letter = chr(64 + idx)
+                worksheet.column_dimensions[column_letter].width = 20
+            
+            # 添加备注行（如果有备注）
+            if any(remarks):
+                for idx, remark in enumerate(remarks, 1):
+                    if remark:
+                        cell = worksheet.cell(row=2, column=idx)
+                        cell.value = f"说明: {remark}"
+                        cell.font = openpyxl.styles.Font(color="808080", italic=True)
+        
+        output.seek(0)
+        
+        # 生成文件名
+        filename = f"{module_name}_导入模板_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        
+        from flask import send_file
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        logger.error(f"生成模板失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'生成模板失败: {str(e)}'
+        }), 500
+    
+    # ========== 通用批量导入：智能字段匹配 ==========
+
+def calculate_similarity(str1, str2):
+    """计算两个字符串的相似度（0-100）"""
+    try:
+        from difflib import SequenceMatcher
+        return int(SequenceMatcher(None, str1.lower(), str2.lower()).ratio() * 100)
+    except:
+        return 0
+
+
+def smart_field_matching(excel_columns, system_fields):
+    """
+    智能字段匹配
+    
+    Args:
+        excel_columns: Excel文件的列名列表
+        system_fields: 系统字段配置列表
+    
+    Returns:
+        {
+            'excel_column': {
+                'matched_field': 'field_name',
+                'similarity': 85,
+                'is_required': True,
+                'field_info': {...}
+            }
+        }
+    """
+    mapping = {}
+    
+    for excel_col in excel_columns:
+        best_match = None
+        best_similarity = 0
+        
+        # 清理Excel列名（去除*等特殊字符）
+        clean_excel_col = excel_col.replace('*', '').strip()
+        
+        for field in system_fields:
+            # 与显示名称比较
+            similarity1 = calculate_similarity(clean_excel_col, field['display_name'])
+            
+            # 与字段名称比较
+            similarity2 = calculate_similarity(clean_excel_col, field['field_name'])
+            
+            # 取最高相似度
+            similarity = max(similarity1, similarity2)
+            
+            # 如果相似度足够高，记录
+            if similarity > best_similarity and similarity >= 60:
+                best_similarity = similarity
+                best_match = field
+        
+        if best_match:
+            mapping[excel_col] = {
+                'matched_field': best_match['field_name'],
+                'similarity': best_similarity,
+                'is_required': best_match['is_required'],
+                'field_info': best_match
+            }
+        else:
+            mapping[excel_col] = {
+                'matched_field': None,
+                'similarity': 0,
+                'is_required': False,
+                'field_info': None
+            }
+    
+    return mapping
+
+
+@app.route('/api/bulk_import/smart_mapping', methods=['POST'])
+def smart_mapping():
+    """智能字段映射"""
+    try:
+        data = request.get_json()
+        module_code = data.get('module_code')
+        excel_columns = data.get('excel_columns', [])
+        
+        if not module_code or not excel_columns:
+            return jsonify({
+                'success': False,
+                'message': '参数不完整'
+            }), 400
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # 获取配置
+        cur.execute("""
+            SELECT id FROM import_config 
+            WHERE module_code = ? AND status = 'enabled'
+        """, (module_code,))
+        
+        config_row = cur.fetchone()
+        if not config_row:
+            return jsonify({
+                'success': False,
+                'message': '配置不存在或已禁用'
+            }), 404
+        
+        config_id = config_row[0]
+        
+        # 获取字段配置
+        cur.execute("""
+            SELECT field_name, display_name, field_type, is_required, 
+                   default_value, max_length, remark 
+            FROM import_config_fields 
+            WHERE config_id = ? 
+            ORDER BY sort_order, id
+        """, (config_id,))
+        
+        field_rows = cur.fetchall()
+        system_fields = []
+        
+        for f_row in field_rows:
+            system_fields.append({
+                'field_name': f_row[0],
+                'display_name': f_row[1],
+                'field_type': f_row[2],
+                'is_required': bool(f_row[3]),
+                'default_value': f_row[4],
+                'max_length': f_row[5],
+                'remark': f_row[6]
+            })
+        
+        # 执行智能匹配
+        mapping = smart_field_matching(excel_columns, system_fields)
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'mapping': mapping,
+                'system_fields': system_fields
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"智能匹配失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'智能匹配失败: {str(e)}'
+        }), 500
+    
+    # ========== 通用批量导入：数据导入核心API ==========
+
+import_tasks = {}
+
+class ImportTask:
+    """导入任务类"""
+    def __init__(self, task_id, total_rows):
+        self.task_id = task_id
+        self.total_rows = total_rows
+        self.processed = 0
+        self.success = 0
+        self.skipped = 0
+        self.failed = 0
+        self.errors = []
+        self.status = 'processing'  # processing, completed, failed
+        self.progress = 0
+        
+    def update_progress(self):
+        if self.total_rows > 0:
+            self.progress = int((self.processed / self.total_rows) * 100)
+        
+    def to_dict(self):
+        return {
+            'task_id': self.task_id,
+            'total_rows': self.total_rows,
+            'processed': self.processed,
+            'success': self.success,
+            'skipped': self.skipped,
+            'failed': self.failed,
+            'errors': self.errors[:100],  # 只返回前100条错误
+            'status': self.status,
+            'progress': self.progress
+        }
+
+
+def validate_field_value(value, field_config):
+    """
+    验证字段值是否符合规则
+    
+    Returns:
+        (is_valid, error_message)
+    """
+    field_name = field_config['field_name']
+    field_type = field_config['field_type']
+    is_required = field_config['is_required']
+    max_length = field_config.get('max_length')
+    
+    # 检查必填
+    if is_required and (value is None or str(value).strip() == ''):
+        return False, f"{field_config['display_name']}为必填字段"
+    
+    # 如果为空且不是必填，使用默认值
+    if value is None or str(value).strip() == '':
+        return True, None
+    
+    value_str = str(value).strip()
+    
+    # 类型验证
+    if field_type == 'number':
+        try:
+            float(value_str)
+        except ValueError:
+            return False, f"{field_config['display_name']}必须是数字"
+    
+    elif field_type == 'date':
+        try:
+            from dateutil import parser
+            parser.parse(value_str)
+        except:
+            return False, f"{field_config['display_name']}日期格式不正确"
+    
+    elif field_type == 'boolean':
+        valid_values = ['true', 'false', '是', '否', '1', '0', 'yes', 'no']
+        if value_str.lower() not in valid_values:
+            return False, f"{field_config['display_name']}必须是布尔值（是/否）"
+    
+    # 长度验证
+    if max_length and len(value_str) > max_length:
+        return False, f"{field_config['display_name']}长度不能超过{max_length}个字符"
+    
+    return True, None
+
+
+def check_duplicate_record(conn, config, row_data, field_mapping):
+    """
+    检查记录是否重复
+    
+    Returns:
+        (is_duplicate, existing_id)
+    """
+    if not config['unique_fields']:
+        return False, None
+    
+    unique_fields = [f.strip() for f in config['unique_fields'].split(',')]
+    
+    # 构建查询条件
+    where_conditions = []
+    params = []
+    
+    for field_name in unique_fields:
+        # 找到该字段对应的Excel列
+        excel_col = None
+        for excel_column, mapped_field in field_mapping.items():
+            if mapped_field == field_name:
+                excel_col = excel_column
+                break
+        
+        if excel_col and excel_col in row_data:
+            value = row_data[excel_col]
+            if value is not None and str(value).strip() != '':
+                where_conditions.append(f"{field_name} = ?")
+                params.append(str(value).strip())
+    
+    if not where_conditions:
+        return False, None
+    
+    # 查询数据库
+    query = f"SELECT id FROM {config['target_table']} WHERE {' AND '.join(where_conditions)}"
+    
+    try:
+        cur = conn.cursor()
+        cur.execute(query, params)
+        row = cur.fetchone()
+        
+        if row:
+            return True, row[0]
+        else:
+            return False, None
+    except Exception as e:
+        logger.error(f"检查重复记录失败: {str(e)}")
+        return False, None
+
+
+def insert_or_update_record(conn, config, row_data, field_mapping, field_configs, strategy, existing_id=None):
+    """
+    插入或更新记录
+    
+    Returns:
+        (success, error_message)
+    """
+    try:
+        # 准备字段和值
+        fields = []
+        values = []
+        
+        for excel_column, field_name in field_mapping.items():
+            if excel_column in row_data:
+                value = row_data[excel_column]
+                
+                # 获取字段配置
+                field_config = next((f for f in field_configs if f['field_name'] == field_name), None)
+                if not field_config:
+                    continue
+                
+                # 处理空值
+                if value is None or str(value).strip() == '':
+                    if field_config.get('default_value'):
+                        value = field_config['default_value']
+                    else:
+                        value = None
+                else:
+                    value = str(value).strip()
+                    
+                    # 类型转换
+                    if field_config['field_type'] == 'number':
+                        try:
+                            value = float(value)
+                        except:
+                            value = None
+                    elif field_config['field_type'] == 'boolean':
+                        value = value.lower() in ['true', '是', '1', 'yes']
+                
+                fields.append(field_name)
+                values.append(value)
+        
+        cur = conn.cursor()
+        
+        if existing_id and strategy == 'overwrite':
+            # 更新记录
+            set_clause = ', '.join([f"{field} = ?" for field in fields])
+            query = f"UPDATE {config['target_table']} SET {set_clause} WHERE id = ?"
+            values.append(existing_id)
+            
+            cur.execute(query, values)
+        else:
+            # 插入记录
+            placeholders = ', '.join(['?' for _ in fields])
+            query = f"INSERT INTO {config['target_table']} ({', '.join(fields)}) VALUES ({placeholders})"
+            
+            cur.execute(query, values)
+        
+        conn.commit()
+        return True, None
+        
+    except Exception as e:
+        logger.error(f"插入/更新记录失败: {str(e)}")
+        return False, str(e)
+
+
+def process_import_task(task_id, file_id, module_code, field_mapping, strategies):
+    """
+    后台处理导入任务
+    """
+    task = import_tasks[task_id]
+    
+    try:
+        # 获取配置
+        conn = get_db()
+        cur = conn.cursor()
+        
+        cur.execute("""
+            SELECT id, target_table, unique_fields 
+            FROM import_config 
+            WHERE module_code = ? AND status = 'enabled'
+        """, (module_code,))
+        
+        config_row = cur.fetchone()
+        if not config_row:
+            task.status = 'failed'
+            task.errors.append({'row': 0, 'message': '配置不存在或已禁用'})
+            return
+        
+        config = {
+            'id': config_row[0],
+            'target_table': config_row[1],
+            'unique_fields': config_row[2]
+        }
+        
+        # 获取字段配置
+        cur.execute("""
+            SELECT field_name, display_name, field_type, is_required, 
+                   default_value, max_length, remark 
+            FROM import_config_fields 
+            WHERE config_id = ?
+        """, (config['id'],))
+        
+        field_rows = cur.fetchall()
+        field_configs = []
+        for f_row in field_rows:
+            field_configs.append({
+                'field_name': f_row[0],
+                'display_name': f_row[1],
+                'field_type': f_row[2],
+                'is_required': bool(f_row[3]),
+                'default_value': f_row[4],
+                'max_length': f_row[5],
+                'remark': f_row[6]
+            })
+        
+        # 读取上传的文件
+        file_path = None
+        for filename in os.listdir(UPLOAD_FOLDER):
+            if filename.startswith(file_id):
+                file_path = os.path.join(UPLOAD_FOLDER, filename)
+                break
+        
+        if not file_path or not os.path.exists(file_path):
+            task.status = 'failed'
+            task.errors.append({'row': 0, 'message': '文件不存在'})
+            return
+        
+        # 解析文件
+        import pandas as pd
+        
+        file_ext = file_path.rsplit('.', 1)[1].lower()
+        if file_ext == 'csv':
+            df = pd.read_csv(file_path, encoding='utf-8')
+        else:
+            df = pd.read_excel(file_path, engine='openpyxl')
+        
+        df = df.dropna(how='all')  # 删除空行
+        
+        # 处理每一行
+        for index, row in df.iterrows():
+            row_num = index + 2  # Excel行号（从2开始，因为第1行是表头）
+            task.processed += 1
+            task.update_progress()
+            
+            # 转换为字典
+            row_data = {}
+            for col in df.columns:
+                value = row[col]
+                if pd.notna(value):
+                    row_data[col] = value
+                else:
+                    row_data[col] = None
+            
+            # 验证数据
+            validation_errors = []
+            for excel_column, field_name in field_mapping.items():
+                field_config = next((f for f in field_configs if f['field_name'] == field_name), None)
+                if field_config:
+                    value = row_data.get(excel_column)
+                    is_valid, error_msg = validate_field_value(value, field_config)
+                    if not is_valid:
+                        validation_errors.append(error_msg)
+            
+            if validation_errors:
+                task.failed += 1
+                task.errors.append({
+                    'row': row_num,
+                    'message': '; '.join(validation_errors)
+                })
+                
+                if not strategies.get('skip_errors', True):
+                    break
+                continue
+            
+            # 检查重复
+            is_duplicate, existing_id = check_duplicate_record(conn, config, row_data, field_mapping)
+            
+            if is_duplicate:
+                duplicate_strategy = strategies.get('duplicate', 'skip')
+                
+                if duplicate_strategy == 'skip':
+                    task.skipped += 1
+                    continue
+                elif duplicate_strategy == 'overwrite':
+                    # 更新记录
+                    success, error = insert_or_update_record(
+                        conn, config, row_data, field_mapping, 
+                        field_configs, 'overwrite', existing_id
+                    )
+                    
+                    if success:
+                        task.success += 1
+                    else:
+                        task.failed += 1
+                        task.errors.append({
+                            'row': row_num,
+                            'message': f'更新失败: {error}'
+                        })
+                else:
+                    # ask策略暂不支持（需要前端交互）
+                    task.skipped += 1
+            else:
+                # 插入新记录
+                success, error = insert_or_update_record(
+                    conn, config, row_data, field_mapping, 
+                    field_configs, 'insert'
+                )
+                
+                if success:
+                    task.success += 1
+                else:
+                    task.failed += 1
+                    task.errors.append({
+                        'row': row_num,
+                        'message': f'插入失败: {error}'
+                    })
+        
+        task.status = 'completed'
+        logger.info(f"导入任务完成: {task_id}, 成功: {task.success}, 跳过: {task.skipped}, 失败: {task.failed}")
+        
+    except Exception as e:
+        logger.error(f"导入任务异常: {str(e)}")
+        task.status = 'failed'
+        task.errors.append({
+            'row': 0,
+            'message': f'系统错误: {str(e)}'
+        })
+
+
+@app.route('/api/bulk_import/execute', methods=['POST'])
+def execute_import():
+    """启动批量导入任务"""
+    try:
+        data = request.get_json()
+        
+        file_id = data.get('file_id')
+        module_code = data.get('module_code')
+        field_mapping = data.get('field_mapping', {})
+        strategies = data.get('strategies', {})
+        total_rows = data.get('total_rows', 0)
+        
+        if not file_id or not module_code or not field_mapping:
+            return jsonify({
+                'success': False,
+                'message': '参数不完整'
+            }), 400
+        
+        # 创建任务
+        task_id = str(uuid.uuid4())
+        task = ImportTask(task_id, total_rows)
+        import_tasks[task_id] = task
+        
+        # 在后台线程执行导入
+        thread = threading.Thread(
+            target=process_import_task,
+            args=(task_id, file_id, module_code, field_mapping, strategies)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'task_id': task_id
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"启动导入任务失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'启动导入失败: {str(e)}'
+        }), 500
+
+
+@app.route('/api/bulk_import/progress/<task_id>', methods=['GET'])
+def get_import_progress(task_id):
+    """获取导入进度"""
+    try:
+        if task_id not in import_tasks:
+            return jsonify({
+                'success': False,
+                'message': '任务不存在'
+            }), 404
+        
+        task = import_tasks[task_id]
+        
+        return jsonify({
+            'success': True,
+            'data': task.to_dict()
+        })
+        
+    except Exception as e:
+        logger.error(f"获取导入进度失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'获取进度失败: {str(e)}'
+        }), 500
+
+
+@app.route('/api/bulk_import/download_error_report/<task_id>')
+def download_error_report(task_id):
+    """下载错误报告"""
+    try:
+        if task_id not in import_tasks:
+            return jsonify({
+                'success': False,
+                'message': '任务不存在'
+            }), 404
+        
+        task = import_tasks[task_id]
+        
+        if not task.errors:
+            return jsonify({
+                'success': False,
+                'message': '没有错误记录'
+            }), 400
+        
+        # 生成错误报告Excel
+        import pandas as pd
+        from io import BytesIO
+        
+        error_df = pd.DataFrame(task.errors)
+        
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            error_df.to_excel(writer, index=False, sheet_name='错误记录')
+        
+        output.seek(0)
+        
+        filename = f"导入错误报告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        from flask import send_file
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        logger.error(f"下载错误报告失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'下载失败: {str(e)}'
+        }), 500
 
 if __name__ == '__main__':
         app.run(debug=True, host='0.0.0.0', port=5000)

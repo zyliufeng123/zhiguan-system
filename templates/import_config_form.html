@@ -1,0 +1,496 @@
+<!-- @ts-nocheck -->
+{% extends "includes/base_with_sidebar.html" %}
+
+{% block title %}
+{% if mode == 'add' %}新增导入配置{% else %}编辑导入配置{% endif %} - 智管系统
+{% endblock %}
+
+{% block head %}
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css" rel="stylesheet">
+<style>
+    .form-container {
+        background: white;
+        border-radius: 8px;
+        padding: 30px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+    
+    .section-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #2c3e50;
+        margin-bottom: 20px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #e9ecef;
+    }
+    
+    .field-item {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        padding: 15px;
+        margin-bottom: 15px;
+        position: relative;
+    }
+    
+    .field-item-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #dee2e6;
+    }
+    
+    .field-item-title {
+        font-weight: 600;
+        color: #495057;
+    }
+    
+    .delete-field-btn {
+        color: #dc3545;
+        cursor: pointer;
+        font-size: 20px;
+    }
+    
+    .delete-field-btn:hover {
+        color: #bd2130;
+    }
+    
+    .unique-fields-selector {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        border: 1px solid #dee2e6;
+    }
+    
+    .unique-field-checkbox {
+        display: flex;
+        align-items: center;
+        padding: 8px 12px;
+        background: white;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .unique-field-checkbox:hover {
+        background: #e9ecef;
+    }
+    
+    .unique-field-checkbox input[type="checkbox"] {
+        margin-right: 8px;
+    }
+    
+    .help-text {
+        font-size: 13px;
+        color: #6c757d;
+        margin-top: 5px;
+    }
+    
+    .btn-add-field {
+        width: 100%;
+        border: 2px dashed #dee2e6;
+        color: #6c757d;
+        transition: all 0.2s;
+    }
+    
+    .btn-add-field:hover {
+        border-color: #0d6efd;
+        color: #0d6efd;
+        background: #f8f9fa;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- 页面标题 -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h4>
+            <i class="bi bi-{% if mode == 'add' %}plus-circle{% else %}pencil-square{% endif %}"></i>
+            {% if mode == 'add' %}新增导入配置{% else %}编辑导入配置{% endif %}
+        </h4>
+        <button class="btn btn-secondary" onclick="window.location.href='/settings/import_config'">
+            <i class="bi bi-arrow-left"></i> 返回列表
+        </button>
+    </div>
+
+    <!-- 表单容器 -->
+    <div class="form-container">
+        <form id="configForm" onsubmit="event.preventDefault(); saveConfig();">
+            
+            <!-- 基本信息 -->
+            <div class="section-title">
+                <i class="bi bi-info-circle"></i> 基本信息
+            </div>
+            
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label class="form-label">模块标识 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="moduleCode" required 
+                           pattern="[a-zA-Z0-9_]+" 
+                           placeholder="如：quotation, order"
+                           {% if mode == 'edit' %}readonly{% endif %}>
+                    <div class="help-text">只能包含字母、数字和下划线，用于系统识别</div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">模块名称 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="moduleName" required 
+                           placeholder="如：智能报价导入">
+                    <div class="help-text">显示在界面上的名称</div>
+                </div>
+            </div>
+            
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <label class="form-label">目标数据表 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="targetTable" required 
+                           placeholder="如：quotes">
+                    <div class="help-text">数据将导入到此表</div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">状态</label>
+                    <select class="form-select" id="status">
+                        <option value="enabled">启用</option>
+                        <option value="disabled">禁用</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- 字段配置 -->
+            <div class="section-title">
+                <i class="bi bi-list-ul"></i> 字段配置
+            </div>
+            
+            <div id="fieldsContainer">
+                <!-- 字段项将通过JS动态添加 -->
+            </div>
+            
+            <button type="button" class="btn btn-add-field mb-4" onclick="addField()">
+                <i class="bi bi-plus-circle"></i> 添加字段
+            </button>
+
+            <!-- 唯一性判断设置 -->
+            <div class="section-title">
+                <i class="bi bi-key"></i> 唯一性判断设置
+            </div>
+            
+            <div class="mb-3">
+                <div class="help-text mb-2">
+                    勾选的字段组合将用于判断数据是否重复。例如：勾选"产品名称+公司+日期"，则这三个字段相同的记录会被判定为重复。
+                </div>
+                <div id="uniqueFieldsSelector" class="unique-fields-selector">
+                    <div class="text-muted">请先添加字段</div>
+                </div>
+            </div>
+
+            <!-- 提交按钮 -->
+            <div class="d-flex justify-content-end gap-2 mt-4">
+                <button type="button" class="btn btn-secondary" 
+                        onclick="window.location.href='/settings/import_config'">
+                    取消
+                </button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-check-circle"></i> 保存配置
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const pageMode = '{{ mode }}';
+const configId = {% if mode == 'edit' %}{{ config_id }}{% else %}null{% endif %};
+let fieldCounter = 0;
+let fields = [];
+
+// 字段类型选项
+const fieldTypes = [
+    { value: 'string', label: '字符串' },
+    { value: 'number', label: '数字' },
+    { value: 'date', label: '日期' },
+    { value: 'boolean', label: '布尔值' }
+];
+
+document.addEventListener('DOMContentLoaded', function() {
+    if (pageMode === 'edit' && configId) {
+        loadConfig();
+    } else {
+        // 新增模式，默认添加一个字段
+        addField();
+    }
+});
+
+async function loadConfig() {
+    try {
+        const response = await fetch(`/api/import_config/${configId}`);
+        const result = await response.json();
+        
+        if (result.success) {
+            const config = result.data;
+            
+            // 填充基本信息
+            document.getElementById('moduleCode').value = config.module_code;
+            document.getElementById('moduleName').value = config.module_name;
+            document.getElementById('targetTable').value = config.target_table;
+            document.getElementById('status').value = config.status;
+            
+            // 加载字段
+            fields = config.fields || [];
+            fields.forEach(field => {
+                addField(field);
+            });
+            
+            // 设置唯一性字段
+            if (config.unique_fields) {
+                const uniqueFieldsArray = config.unique_fields.split(',').map(f => f.trim());
+                setTimeout(() => {
+                    uniqueFieldsArray.forEach(fieldName => {
+                        const checkbox = document.querySelector(`input[name="unique_field"][value="${fieldName}"]`);
+                        if (checkbox) {
+                            checkbox.checked = true;
+                        }
+                    });
+                }, 100);
+            }
+        } else {
+            showError('加载配置失败: ' + result.message);
+        }
+    } catch (error) {
+        console.error('加载配置失败:', error);
+        showError('加载配置失败: ' + error.message);
+    }
+}
+
+function addField(fieldData = null) {
+    const fieldId = fieldCounter++;
+    const container = document.getElementById('fieldsContainer');
+    
+    const fieldHtml = `
+        <div class="field-item" id="field_${fieldId}">
+            <div class="field-item-header">
+                <div class="field-item-title">字段 ${fieldId + 1}</div>
+                <span class="delete-field-btn" onclick="removeField(${fieldId})" title="删除字段">
+                    <i class="bi bi-x-circle"></i>
+                </span>
+            </div>
+            
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">字段名称 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control field-name" 
+                           id="fieldName_${fieldId}" 
+                           value="${fieldData?.field_name || ''}"
+                           placeholder="如：product_name" 
+                           required
+                           onchange="updateUniqueFieldsSelector()">
+                    <div class="help-text">数据库字段名</div>
+                </div>
+                
+                <div class="col-md-4">
+                    <label class="form-label">显示名称 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control field-display-name" 
+                           id="fieldDisplayName_${fieldId}"
+                           value="${fieldData?.display_name || ''}"
+                           placeholder="如：产品名称" 
+                           required>
+                    <div class="help-text">Excel列名提示</div>
+                </div>
+                
+                <div class="col-md-4">
+                    <label class="form-label">字段类型 <span class="text-danger">*</span></label>
+                    <select class="form-select field-type" id="fieldType_${fieldId}" required>
+                        ${fieldTypes.map(type => 
+                            `<option value="${type.value}" ${fieldData?.field_type === type.value ? 'selected' : ''}>
+                                ${type.label}
+                            </option>`
+                        ).join('')}
+                    </select>
+                </div>
+                
+                <div class="col-md-3">
+                    <label class="form-label">是否必填</label>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input field-required" 
+                               type="checkbox" 
+                               id="fieldRequired_${fieldId}"
+                               ${fieldData?.is_required ? 'checked' : ''}>
+                        <label class="form-check-label" for="fieldRequired_${fieldId}">必填</label>
+                    </div>
+                </div>
+                
+                <div class="col-md-3">
+                    <label class="form-label">最大长度</label>
+                    <input type="number" class="form-control field-max-length" 
+                           id="fieldMaxLength_${fieldId}"
+                           value="${fieldData?.max_length || ''}"
+                           placeholder="如：255">
+                </div>
+                
+                <div class="col-md-6">
+                    <label class="form-label">默认值</label>
+                    <input type="text" class="form-control field-default-value" 
+                           id="fieldDefaultValue_${fieldId}"
+                           value="${fieldData?.default_value || ''}"
+                           placeholder="留空表示无默认值">
+                </div>
+                
+                <div class="col-md-12">
+                    <label class="form-label">备注说明</label>
+                    <input type="text" class="form-control field-remark" 
+                           id="fieldRemark_${fieldId}"
+                           value="${fieldData?.remark || ''}"
+                           placeholder="如：用于识别产品，格式：YYYY-MM-DD">
+                </div>
+            </div>
+        </div>
+    `;
+    
+    container.insertAdjacentHTML('beforeend', fieldHtml);
+    updateUniqueFieldsSelector();
+}
+
+function removeField(fieldId) {
+    if (!confirm('确定要删除此字段吗？')) {
+        return;
+    }
+    
+    const fieldElement = document.getElementById(`field_${fieldId}`);
+    if (fieldElement) {
+        fieldElement.remove();
+        updateUniqueFieldsSelector();
+    }
+}
+
+function updateUniqueFieldsSelector() {
+    const container = document.getElementById('uniqueFieldsSelector');
+    const fieldNames = [];
+    
+    // 收集所有已填写的字段名
+    document.querySelectorAll('.field-name').forEach(input => {
+        if (input.value.trim()) {
+            const displayNameInput = input.closest('.field-item').querySelector('.field-display-name');
+            fieldNames.push({
+                name: input.value.trim(),
+                displayName: displayNameInput.value.trim() || input.value.trim()
+            });
+        }
+    });
+    
+    if (fieldNames.length === 0) {
+        container.innerHTML = '<div class="text-muted">请先添加字段</div>';
+        return;
+    }
+    
+    // 生成复选框
+    container.innerHTML = fieldNames.map(field => `
+        <label class="unique-field-checkbox">
+            <input type="checkbox" name="unique_field" value="${field.name}">
+            <span>${field.displayName} (${field.name})</span>
+        </label>
+    `).join('');
+}
+
+async function saveConfig() {
+    try {
+        // 收集基本信息
+        const data = {
+            module_code: document.getElementById('moduleCode').value.trim(),
+            module_name: document.getElementById('moduleName').value.trim(),
+            target_table: document.getElementById('targetTable').value.trim(),
+            status: document.getElementById('status').value
+        };
+        
+        // 收集字段配置
+        data.fields = [];
+        const fieldItems = document.querySelectorAll('.field-item');
+        
+        fieldItems.forEach((item, index) => {
+            const fieldId = item.id.split('_')[1];
+            const field = {
+                field_name: document.getElementById(`fieldName_${fieldId}`).value.trim(),
+                display_name: document.getElementById(`fieldDisplayName_${fieldId}`).value.trim(),
+                field_type: document.getElementById(`fieldType_${fieldId}`).value,
+                is_required: document.getElementById(`fieldRequired_${fieldId}`).checked,
+                max_length: document.getElementById(`fieldMaxLength_${fieldId}`).value || null,
+                default_value: document.getElementById(`fieldDefaultValue_${fieldId}`).value.trim() || null,
+                remark: document.getElementById(`fieldRemark_${fieldId}`).value.trim() || null,
+                sort_order: index
+            };
+            
+            data.fields.push(field);
+        });
+        
+        // 验证至少有一个字段
+        if (data.fields.length === 0) {
+            showError('请至少添加一个字段');
+            return;
+        }
+        
+        // 收集唯一性字段
+        const uniqueFields = [];
+        document.querySelectorAll('input[name="unique_field"]:checked').forEach(checkbox => {
+            uniqueFields.push(checkbox.value);
+        });
+        data.unique_fields = uniqueFields;
+        
+        // 验证至少选择一个唯一性字段
+        if (uniqueFields.length === 0) {
+            if (!confirm('未设置唯一性判断字段，导入时将无法识别重复数据。确定要继续吗？')) {
+                return;
+            }
+        }
+        
+        // 提交数据
+        let url, method;
+        if (pageMode === 'add') {
+            url = '/api/import_config';
+            method = 'POST';
+        } else {
+            url = `/api/import_config/${configId}`;
+            method = 'PUT';
+        }
+        
+        const response = await fetch(url, {
+            method: method,
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showSuccess(result.message);
+            setTimeout(() => {
+                window.location.href = '/settings/import_config';
+            }, 1500);
+        } else {
+            showError(result.message);
+        }
+        
+    } catch (error) {
+        console.error('保存配置失败:', error);
+        showError('保存失败: ' + error.message);
+    }
+}
+
+function showSuccess(message) {
+    alert('✅ ' + message);
+}
+
+function showError(message) {
+    alert('❌ ' + message);
+}
+</script>
+{% endblock %}
