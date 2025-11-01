@@ -92,8 +92,8 @@ console.log('计算分析页面脚本加载完成');
 function cleanProductName(name) {
     if (!name) return '';
     // 匹配模式：产品名称-数字编码
-    const match = name.trim().match(/^(.+?)-\d+$/);
-    return match ? match[1].trim() : name.trim();
+    const match = name.toString().trim().match(/^(.+?)-\d+$/);
+    return match ? match[1].trim() : name.toString().trim();
 }
 
 // 全局变量
@@ -165,15 +165,17 @@ async function generateTable() {
     let products = [];
     
     if (manualSetting) {
-        // 使用手动设置的产品列表
-        const productList = document.getElementById('product_list').value.trim();
-        if (!productList) {
-            alert('请输入产品列表或取消勾选手动设置');
-            return;
-            const rawProducts = productList.split('\n').filter(p => p.trim());
-            products = rawProducts.map(p => cleanProductName(p));
-        }
-        products = productList.split('\n').filter(p => p.trim());
+    // 使用手动设置的产品列表
+    const productList = document.getElementById('product_list').value.trim();
+    if (!productList) {
+        alert('请输入产品列表或取消勾选手动设置');
+        return;
+    }
+    // ===== 核心修改：清理每个产品名称 =====
+    const rawProducts = productList.split('\n').filter(p => p.trim());
+    products = rawProducts.map(p => cleanProductName(p));
+    // ===== 修改结束 =====
+
     } else {
         // 自动从第一个价格列获取产品列表
         try {
@@ -1150,8 +1152,13 @@ function restorePageState() {
             // 设置恢复状态标志，避免重复加载
             window.isRestoringState = true;
             
-            // 重新生成表格
-            generateBasicTable(tableState.products);
+            // ===== 核心修改：恢复时清理所有产品名称 =====
+            const cleanedProducts = tableState.products.map(p => cleanProductName(p));
+            console.log('原始产品列表:', tableState.products);
+            console.log('清理后产品列表:', cleanedProducts);
+            
+            // 重新生成表格（使用清理后的产品名）
+            generateBasicTable(cleanedProducts);
             
             // 延迟恢复数据，确保表格已生成
             setTimeout(() => {
